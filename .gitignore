@@ -1,0 +1,23 @@
+# Môi trường ảo
+.venv/
+venv/
+env/
+
+# Bí mật và cấu hình cục bộ
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Dữ liệu khách hàng thật
+data/raw/
+data/private/
+*.csv
+*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

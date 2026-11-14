@@ -1,5 +1,4 @@
-﻿
-"""PLPT-16: Deterministic Rules Baseline Queue Engine."""
+﻿"""PLPT-16: Deterministic Rules Baseline Queue Engine."""
 
 from datetime import datetime, date
 from typing import Any
@@ -22,6 +21,8 @@ SUPPORTED_PRODUCTS = {
     "Packaging Line",
     "Spare Parts",
 }
+
+CLOSED_WORKFLOW_STATES = {"closed", "withdrawn"}
 
 
 def _first_value(enquiry: dict, *fields):
@@ -102,6 +103,17 @@ def _is_urgent_replacement(enquiry):
         "emergency_replacement",
         "critical",
     }
+
+
+def _is_closed_enquiry(enquiry: dict) -> bool:
+    state = _first_value(
+        enquiry,
+        "workflow_state",
+        "current_workflow_state_export_only",
+    )
+    if state is None:
+        return False
+    return str(state).strip().lower() in CLOSED_WORKFLOW_STATES
 
 
 def calculate_rules_score(enquiry: dict, now=None) -> dict:
@@ -222,16 +234,12 @@ def calculate_rules_score(enquiry: dict, now=None) -> dict:
         ),
     }
 
-    # Tier 0: emergency replacement or urgent SLA deadline.
+    # Tier 0: chỉ tính quá hạn SLA / khẩn cấp cho hồ sơ chưa đóng (không phải Closed/withdrawn)
+    is_closed = _is_closed_enquiry(enquiry)
     urgent_replacement = _is_urgent_replacement(enquiry)
+    sla_overdue = days_to_due is not None and days_to_due <= 1
 
-    tier0 = (
-        urgent_replacement
-        or (
-            days_to_due is not None
-            and days_to_due <= 1
-        )
-    )
+    tier0 = (not is_closed) and (urgent_replacement or sla_overdue)
 
     total = sum(
         item["points"]
@@ -251,17 +259,26 @@ def calculate_rules_score(enquiry: dict, now=None) -> dict:
         ),
     )[:3]
 
+    # Luôn trả về đúng 3 chuỗi lý do [str, str, str] theo chuẩn JSON mục 6
+    all_sorted_factors = sorted(
+        contributions.items(),
+        key=lambda kv: (-kv[1]["points"], kv[0]),
+    )
+    reasons_3 = [item[1]["reason"] for item in all_sorted_factors[:3]]
+
     return {
         "enquiry_id": _first_value(
             enquiry, "enquiry_id", "enquiry_key", "id"
         ),
+        "account_key": _first_value(enquiry, "account_key") or "",
         "rules_label": RULES_LABEL,
-        "rules_score": total,
+        "rules_score": float(total),
         "score_unit": "points",
         "priority_tier": "TIER_0" if tier0 else "STANDARD",
         "tier0_bypass": tier0,
         "top_contributors": top_factors,
-        "t0_time": t0_value,
+        "reasons": reasons_3,
+        "t0_time": t0_value or "",
         "timestamp_source": (
             "t0_time"
             if enquiry.get("t0_time")

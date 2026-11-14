@@ -1,6 +1,7 @@
-
 from datetime import datetime, timedelta
+from fastapi.testclient import TestClient
 
+from src.api.main import app
 from src.rules.rules_engine import (
     WEIGHTS,
     RULES_LABEL,
@@ -15,6 +16,7 @@ NOW = datetime(2026, 11, 14, 12, 0, 0)
 def make_enquiry(**overrides):
     enquiry = {
         "enquiry_id": "ENQ001",
+        "account_key": "ACCT-001",
         "product_category_at_t0": "Industrial Pump",
         "request_completeness_at_t0": "yes",
         "urgency_flag_at_t0": "normal",
@@ -22,6 +24,7 @@ def make_enquiry(**overrides):
             NOW - timedelta(days=8)
         ).isoformat(),
         "contract_due_date": "2026-11-14",
+        "workflow_state": "Under_Review",
     }
 
     enquiry.update(overrides)
@@ -104,6 +107,24 @@ def test_tier0_urgent_sla():
     assert result["priority_tier"] == "TIER_0"
 
 
+def test_closed_enquiry_does_not_trigger_tier0():
+    closed_old = make_enquiry(
+        enquiry_id="ENQ_CLOSED",
+        urgency_flag_at_t0="urgent_replacement",
+        contract_due_date="2025-02-01",
+        workflow_state="Closed",
+    )
+    withdrawn_old = make_enquiry(
+        enquiry_id="ENQ_WITHDRAWN",
+        urgency_flag_at_t0="normal",
+        contract_due_date="2025-02-01",
+        workflow_state="withdrawn",
+    )
+
+    assert calculate_rules_score(closed_old, now=NOW)["priority_tier"] == "STANDARD"
+    assert calculate_rules_score(withdrawn_old, now=NOW)["priority_tier"] == "STANDARD"
+
+
 def test_fifo_when_scores_are_equal():
     older = make_enquiry(
         enquiry_id="OLDER",
@@ -131,6 +152,7 @@ def test_maximum_three_contributors():
     )
 
     assert len(result["top_contributors"]) <= 3
+    assert len(result["reasons"]) == 3
 
 
 def test_score_is_not_probability():
@@ -156,3 +178,32 @@ def test_queue_rank_is_sequential():
     assert [
         item["queue_rank"] for item in queue
     ] == [1, 2, 3]
+
+
+def test_api_queue_contract():
+    client = TestClient(app)
+    res = client.get("/api/queue?limit=5")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["status"] in ("OK", "HOLD_STALE_DATA")
+    assert isinstance(data["source_age_hours"], float)
+    assert len(data["items"]) == 5
+
+    first = data["items"][0]
+    expected_keys = {
+        "enquiry_id",
+        "account_key",
+        "final_rank",
+        "rule_score",
+        "score_mode",
+        "is_urgent",
+        "is_blocked",
+        "reasons",
+        "t0_time",
+    }
+    assert set(first.keys()) == expected_keys
+    assert first["score_mode"] == "RULES_BASELINE"
+    assert first["final_rank"] == 1
+    assert isinstance(first["reasons"], list)
+    assert len(first["reasons"]) == 3

@@ -1,12 +1,12 @@
-import os
+﻿import os
 import pandas as pd
 
 # ============================================================
 # PLPT-11 / US-03
-# Audit script cho dữ liệu chuẩn SongNhat AI-02 trong data/raw/
+# Audit script cho dá»¯ liá»‡u chuáº©n SongNhat AI-02 trong data/raw/
 # ============================================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENQUIRY_FILE = os.path.join(BASE_DIR, "data", "raw", "enquiries_snapshot.csv")
 OUTCOME_FILE = os.path.join(BASE_DIR, "data", "raw", "outcome_events.csv")
 
@@ -68,14 +68,14 @@ def main():
 
     for path in [ENQUIRY_FILE, OUTCOME_FILE]:
         if not os.path.isfile(path):
-            print(f"[FATAL] Không tìm thấy file: {path}")
+            print(f"[FATAL] KhÃ´ng tÃ¬m tháº¥y file: {path}")
             return
 
     try:
         enq = pd.read_csv(ENQUIRY_FILE, dtype=str)
         out = pd.read_csv(OUTCOME_FILE, dtype=str)
     except Exception as exc:
-        print(f"[FATAL] Không đọc được CSV: {exc}")
+        print(f"[FATAL] KhÃ´ng Ä‘á»c Ä‘Æ°á»£c CSV: {exc}")
         return
 
     print(f"Enquiry Snapshot: {len(enq)} rows, {len(enq.columns)} columns")
@@ -88,22 +88,22 @@ def main():
         result(
             "Schema",
             False,
-            f"Thiếu cột Enquiry={missing_enq}; Outcome={missing_out}",
+            f"Thiáº¿u cá»™t Enquiry={missing_enq}; Outcome={missing_out}",
         )
-        print("\nDừng kiểm tra vì schema không đúng.")
+        print("\nDá»«ng kiá»ƒm tra vÃ¬ schema khÃ´ng Ä‘Ãºng.")
         return
 
     result(
         "Schema",
         True,
-        f"Đủ {len(ENQUIRY_REQUIRED)} cột Enquiry Snapshot và {len(OUTCOME_REQUIRED)} cột Outcome Events.",
+        f"Äá»§ {len(ENQUIRY_REQUIRED)} cá»™t Enquiry Snapshot vÃ  {len(OUTCOME_REQUIRED)} cá»™t Outcome Events.",
     )
 
     for df in (enq, out):
         for col in df.columns:
             df[col] = df[col].astype("string").str.strip()
 
-    # Chuyển đổi ngày giờ an toàn (errors="coerce" để không bị crash khi gặp dòng lỗi)
+    # Chuyá»ƒn Ä‘á»•i ngÃ y giá» an toÃ n (errors="coerce" Ä‘á»ƒ khÃ´ng bá»‹ crash khi gáº·p dÃ²ng lá»—i)
     enq["t0_time"] = pd.to_datetime(enq["t0_time"], errors="coerce", utc=False)
     enq["extraction_time"] = pd.to_datetime(enq["extraction_time"], errors="coerce", utc=False)
     enq["feature_event_time"] = pd.to_datetime(enq["feature_event_time"], errors="coerce", utc=False)
@@ -114,7 +114,7 @@ def main():
     out["observation_window_days"] = pd.to_numeric(out["observation_window_days"], errors="coerce")
 
     # --------------------------------------------------------
-    # STEP 0.5 - QUARANTINE CHECK (BỎ QUA DÒNG LỖI, KHÔNG CRASH)
+    # STEP 0.5 - QUARANTINE CHECK (Bá»Ž QUA DÃ’NG Lá»–I, KHÃ”NG CRASH)
     # --------------------------------------------------------
     print("\n[STEP 0.5] QUARANTINE ERROR ROWS CHECK")
 
@@ -129,17 +129,17 @@ def main():
     quarantine_count = int(bad_mask.sum())
     bad_ids = set(enq.loc[bad_mask, "enquiry_id"].dropna().tolist())
 
-    print(f"Số dòng lỗi phát hiện (cần đưa vào Quarantine): {quarantine_count}")
+    print(f"Sá»‘ dÃ²ng lá»—i phÃ¡t hiá»‡n (cáº§n Ä‘Æ°a vÃ o Quarantine): {quarantine_count}")
     if quarantine_count > 0:
-        print(f"Ví dụ mã lỗi: {sorted(list(bad_ids))[:5]}")
+        print(f"VÃ­ dá»¥ mÃ£ lá»—i: {sorted(list(bad_ids))[:5]}")
 
     result(
         "Quarantine detection",
         True,
-        f"Đã phát hiện và bỏ qua an toàn {quarantine_count} dòng lỗi cần đưa vào Quarantine.",
+        f"ÄÃ£ phÃ¡t hiá»‡n vÃ  bá» qua an toÃ n {quarantine_count} dÃ²ng lá»—i cáº§n Ä‘Æ°a vÃ o Quarantine.",
     )
 
-    # Tách bỏ dòng lỗi để kiểm tra tiếp các dòng hợp lệ
+    # TÃ¡ch bá» dÃ²ng lá»—i Ä‘á»ƒ kiá»ƒm tra tiáº¿p cÃ¡c dÃ²ng há»£p lá»‡
     enq = enq[~bad_mask].copy()
     out = out[~out["enquiry_id"].isin(bad_ids)].copy()
 
@@ -155,8 +155,8 @@ def main():
     result(
         "Unique enquiry_id",
         ids_unique,
-        "Mỗi enquiry_id chỉ xuất hiện một lần trong từng file."
-        if ids_unique else "Có enquiry_id bị trùng.",
+        "Má»—i enquiry_id chá»‰ xuáº¥t hiá»‡n má»™t láº§n trong tá»«ng file."
+        if ids_unique else "CÃ³ enquiry_id bá»‹ trÃ¹ng.",
     )
     if not ids_unique:
         return
@@ -174,7 +174,7 @@ def main():
     result(
         "One-to-one join",
         unmatched == 0,
-        f"Ghép được {len(merged) - unmatched}/{len(merged)} hồ sơ hợp lệ; không ghép được: {unmatched}.",
+        f"GhÃ©p Ä‘Æ°á»£c {len(merged) - unmatched}/{len(merged)} há»“ sÆ¡ há»£p lá»‡; khÃ´ng ghÃ©p Ä‘Æ°á»£c: {unmatched}.",
     )
     if unmatched:
         return
@@ -182,7 +182,7 @@ def main():
     merged = merged[merged["_merge"] == "both"].copy()
 
     dup_accounts = int(enq["account_key"].duplicated(keep=False).sum())
-    print(f"Số dòng có account_key lặp lại (cần gộp trùng khi ingest): {dup_accounts}")
+    print(f"Sá»‘ dÃ²ng cÃ³ account_key láº·p láº¡i (cáº§n gá»™p trÃ¹ng khi ingest): {dup_accounts}")
 
     # --------------------------------------------------------
     # STEP 2 - COHORT CONSISTENCY
@@ -193,7 +193,7 @@ def main():
     result(
         "Cohort consistency",
         cohort_mismatch == 0,
-        f"Số hồ sơ có cohort khác nhau giữa hai file: {cohort_mismatch}.",
+        f"Sá»‘ há»“ sÆ¡ cÃ³ cohort khÃ¡c nhau giá»¯a hai file: {cohort_mismatch}.",
     )
     print(f"Enquiry cohort counts: {enq['cohort'].value_counts(dropna=False).to_dict()}")
 
@@ -238,8 +238,8 @@ def main():
     result(
         "AC1 Volume Floor",
         ac1_ok,
-        "Training cohort đạt ngưỡng số lượng và kiểm tra bằng chứng nhãn."
-        if ac1_ok else "Training cohort chưa đạt một hoặc nhiều điều kiện AC1.",
+        "Training cohort Ä‘áº¡t ngÆ°á»¡ng sá»‘ lÆ°á»£ng vÃ  kiá»ƒm tra báº±ng chá»©ng nhÃ£n."
+        if ac1_ok else "Training cohort chÆ°a Ä‘áº¡t má»™t hoáº·c nhiá»u Ä‘iá»u kiá»‡n AC1.",
     )
 
     # --------------------------------------------------------
@@ -278,8 +278,8 @@ def main():
     result(
         "AC2 Independent Later Test Cohort",
         ac2_ok,
-        "Cohort test có đủ số lượng P/N và nằm sau giai đoạn training."
-        if ac2_ok else "Test cohort chưa đạt một hoặc nhiều điều kiện AC2.",
+        "Cohort test cÃ³ Ä‘á»§ sá»‘ lÆ°á»£ng P/N vÃ  náº±m sau giai Ä‘oáº¡n training."
+        if ac2_ok else "Test cohort chÆ°a Ä‘áº¡t má»™t hoáº·c nhiá»u Ä‘iá»u kiá»‡n AC2.",
     )
 
     # --------------------------------------------------------
@@ -297,19 +297,19 @@ def main():
     result(
         "Feature event time",
         event_invalid == 0,
-        "Tất cả feature_event_time có trước hoặc đúng t0_time."
-        if event_invalid == 0 else f"Có {event_invalid} dòng feature_event_time sau t0_time.",
+        "Táº¥t cáº£ feature_event_time cÃ³ trÆ°á»›c hoáº·c Ä‘Ãºng t0_time."
+        if event_invalid == 0 else f"CÃ³ {event_invalid} dÃ²ng feature_event_time sau t0_time.",
     )
 
     result(
         "Feature availability time",
         available_invalid == 0,
-        "Tất cả feature_available_at có trước hoặc đúng t0_time."
-        if available_invalid == 0 else f"Có {available_invalid} dòng feature_available_at sau t0_time.",
+        "Táº¥t cáº£ feature_available_at cÃ³ trÆ°á»›c hoáº·c Ä‘Ãºng t0_time."
+        if available_invalid == 0 else f"CÃ³ {available_invalid} dÃ²ng feature_available_at sau t0_time.",
     )
 
     forbidden_columns = [col for col in enq.columns if col.endswith("_DO_NOT_USE")]
-    print("Các cột bị cấm đưa vào biến tính điểm (_DO_NOT_USE):")
+    print("CÃ¡c cá»™t bá»‹ cáº¥m Ä‘Æ°a vÃ o biáº¿n tÃ­nh Ä‘iá»ƒm (_DO_NOT_USE):")
     for col in forbidden_columns:
         print(f"  - {col}")
 
@@ -323,13 +323,13 @@ def main():
     unknown_open = merged[merged["label"] == "Unknown"]
 
     coverage = len(known_labels) / len(eligible) * 100 if len(eligible) else 0
-    print(f"Hồ sơ đủ 60 ngày (MATURE): {len(eligible)} | Label coverage: {coverage:.2f}%")
-    print(f"Hồ sơ mới chưa đủ 60 ngày (Unknown): {len(unknown_open)}")
+    print(f"Há»“ sÆ¡ Ä‘á»§ 60 ngÃ y (MATURE): {len(eligible)} | Label coverage: {coverage:.2f}%")
+    print(f"Há»“ sÆ¡ má»›i chÆ°a Ä‘á»§ 60 ngÃ y (Unknown): {len(unknown_open)}")
 
     result(
         "AC4 Label coverage",
         coverage >= 90,
-        f"Label coverage {coverage:.2f}% (ngưỡng >= 90%).",
+        f"Label coverage {coverage:.2f}% (ngÆ°á»¡ng >= 90%).",
     )
 
     # --------------------------------------------------------
@@ -344,7 +344,7 @@ def main():
     print(f"PASS       : {pass_count}")
     print(f"FAIL       : {fail_count}")
     print(f"WARNING    : {warning_count}")
-    print(f"QUARANTINE : {quarantine_count} dòng lỗi đã được tách riêng")
+    print(f"QUARANTINE : {quarantine_count} dÃ²ng lá»—i Ä‘Ã£ Ä‘Æ°á»£c tÃ¡ch riÃªng")
     print("=" * 76)
 
 

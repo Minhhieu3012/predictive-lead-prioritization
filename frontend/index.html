@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SongNhat AI-02 | Hàng đợi Báo giá & Kiểm soát An toàn (PLPT-17)</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    body { margin: 0; padding: 24px; background: #f4f6f9; color: #1e293b; }
+    .container { max-width: 1120px; margin: 0 auto; }
+    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .title { margin: 0; font-size: 20px; font-weight: 700; }
+    .meta { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .badge { padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-hold { background: #fee2e2; color: #991b1b; }
+    .banner-hold {
+      display: none; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b;
+      padding: 14px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;
+    }
+    .card { background: #ffffff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
+    .block-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
+    .field label { font-size: 12px; font-weight: 600; color: #475569; }
+    .field input { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    button { padding: 9px 14px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-secondary { background: #e2e8f0; color: #1e293b; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    th { background: #f8fafc; font-weight: 600; color: #475569; }
+    .tier0 { display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .msg { display: none; margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+    .msg.ok { display: block; background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
+    .msg.err { display: block; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">SongNhat AI-02 — Hàng đợi Ưu tiên & Kiểm soát Khẩn cấp</h1>
+      <div class="meta">
+        <span>Tổng hợp lệ: <strong id="total-count">-</strong></span>
+        <span>Tuổi dữ liệu: <strong id="age-hours">-</strong> giờ</span>
+        <span id="status-badge" class="badge badge-ok">Đang tải...</span>
+        <button type="button" class="btn-secondary btn-sm" onclick="loadQueue()">Làm mới</button>
+      </div>
+    </div>
+
+    <div id="stale-banner" class="banner-hold"></div>
+
+    <div class="card">
+      <div class="block-form">
+        <div class="field">
+          <label for="enquiry_id">Mã hồ sơ (enquiry_id)</label>
+          <input id="enquiry_id" type="text" placeholder="Ví dụ: SN-0610" />
+        </div>
+        <div class="field">
+          <label for="account_key">Mã khách hàng (account_key)</label>
+          <input id="account_key" type="text" placeholder="Ví dụ: ACCT-0714" />
+        </div>
+        <div class="field">
+          <label for="reason">Lý do chặn khẩn cấp</label>
+          <input id="reason" type="text" value="Chặn khẩn cấp theo yêu cầu PO" />
+        </div>
+        <button type="button" class="btn-danger" onclick="submitBlock()">Chặn khẩn cấp</button>
+      </div>
+      <div id="action-msg" class="msg"></div>
+    </div>
+
+    <div class="card" id="queue-card">
+      <table>
+        <thead>
+          <tr>
+            <th>Hạng</th>
+            <th>Mã hồ sơ</th>
+            <th>Khách hàng</th>
+            <th>Điểm Rules</th>
+            <th>Ưu tiên</th>
+            <th>Lý do giải thích (tối đa 3)</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="queue-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    let msgTimer = null;
+
+    function clearMessage() {
+      const msgEl = document.getElementById("action-msg");
+      msgEl.className = "msg";
+      msgEl.textContent = "";
+      sessionStorage.removeItem("last_block_msg");
+    }
+
+    function showMessage(type, text, durationMs = 0) {
+      const msgEl = document.getElementById("action-msg");
+      msgEl.className = `msg ${type}`;
+      msgEl.textContent = text;
+
+      if (msgTimer) {
+        clearTimeout(msgTimer);
+        msgTimer = null;
+      }
+
+      if (durationMs > 0) {
+        const expiresAt = Date.now() + durationMs;
+        sessionStorage.setItem("last_block_msg", JSON.stringify({ type, text, expiresAt }));
+        msgTimer = setTimeout(clearMessage, durationMs);
+      }
+    }
+
+    function restorePersistedMessage() {
+      const saved = sessionStorage.getItem("last_block_msg");
+      if (!saved) return;
+      try {
+        const parsed = JSON.parse(saved);
+        const remaining = (parsed.expiresAt || 0) - Date.now();
+        if (remaining > 0 && parsed.text) {
+          const msgEl = document.getElementById("action-msg");
+          msgEl.className = `msg ${parsed.type || "ok"}`;
+          msgEl.textContent = parsed.text;
+          if (msgTimer) clearTimeout(msgTimer);
+          msgTimer = setTimeout(clearMessage, remaining);
+        } else {
+          sessionStorage.removeItem("last_block_msg");
+        }
+      } catch (_) {}
+    }
+
+    async function loadQueue() {
+      restorePersistedMessage();
+      try {
+        const res = await fetch(`${API_BASE}/api/queue?limit=20`);
+        const data = await res.json();
+
+        document.getElementById("total-count").textContent = data.total ?? 0;
+        document.getElementById("age-hours").textContent = data.source_age_hours ?? "-";
+
+        const badge = document.getElementById("status-badge");
+        const banner = document.getElementById("stale-banner");
+        const queueCard = document.getElementById("queue-card");
+        const isHeld = data.status === "HELD_STALE_DATA" || data.locked === true;
+
+        badge.textContent = data.status;
+        badge.className = `badge ${isHeld ? "badge-hold" : "badge-ok"}`;
+
+        if (isHeld) {
+          banner.style.display = "block";
+          banner.textContent = data.warning || "CẢNH BÁO: Dữ liệu nguồn quá hạn 24 giờ. Hàng đợi đã tự động khóa (HELD_STALE_DATA).";
+          queueCard.style.display = "none";
+          return;
+        }
+
+        banner.style.display = "none";
+        queueCard.style.display = "block";
+
+        const items = data.items || [];
+        const tbody = document.getElementById("queue-body");
+        tbody.innerHTML = "";
+
+        if (items.length > 0 && !document.getElementById("enquiry_id").value) {
+          document.getElementById("enquiry_id").placeholder = `Ví dụ: ${items[0].enquiry_id}`;
+          document.getElementById("account_key").placeholder = `Ví dụ: ${items[0].account_key}`;
+        }
+
+        for (const row of items) {
+          const tr = document.createElement("tr");
+          const reasonsHtml = (row.reasons || []).map(r => `<div>• ${r}</div>`).join("");
+          tr.innerHTML = `
+            <td><strong>#${row.final_rank}</strong></td>
+            <td>${row.enquiry_id}</td>
+            <td>${row.account_key}</td>
+            <td>${row.rule_score}</td>
+            <td>${row.is_urgent ? '<span class="tier0">TIER 0</span>' : 'STANDARD'}</td>
+            <td>${reasonsHtml}</td>
+            <td>
+              <button type="button" class="btn-danger btn-sm" onclick="quickBlock('${row.enquiry_id}', '${row.account_key}')">
+                Chặn
+              </button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        }
+      } catch (err) {
+        showMessage("err", "Không kết nối được API tại http://127.0.0.1:8000. Hãy chắc chắn Uvicorn đang chạy.", 0);
+      }
+    }
+
+    async function quickBlock(enqId, acctKey) {
+      document.getElementById("enquiry_id").value = enqId;
+      document.getElementById("account_key").value = acctKey;
+      await submitBlock();
+    }
+
+    async function submitBlock() {
+      const enquiry_id = document.getElementById("enquiry_id").value.trim();
+      const account_key = document.getElementById("account_key").value.trim();
+      const reason = document.getElementById("reason").value.trim();
+
+      if (!enquiry_id && !account_key) {
+        showMessage("err", "Vui lòng nhập mã hồ sơ (SN-...) hoặc mã khách hàng (ACCT-...).", 0);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/block`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enquiry_id, account_key, reason })
+        });
+        const result = await res.json();
+        if (!res.ok) {
+          showMessage("err", result.detail || "Chặn thất bại.", 0);
+          return;
+        }
+        showMessage(
+          "ok",
+          `Đã chặn thành công: ${result.enquiry_id || ""} / ${result.account_key || ""} — Hồ sơ đã biến mất khỏi hàng đợi.`,
+          2000
+        );
+        document.getElementById("enquiry_id").value = "";
+        document.getElementById("account_key").value = "";
+        await loadQueue();
+      } catch (err) {
+        showMessage("err", "Lỗi kết nối khi gọi POST /api/block.", 0);
+      }
+    }
+
+    loadQueue();
+  </script>
+</body>
+</html>

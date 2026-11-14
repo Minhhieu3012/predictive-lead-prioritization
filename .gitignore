@@ -21,3 +21,11 @@ data/private/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+.pytest_cache/
+*.db
+data/quarantine/
+# Auto-generated & local runtime files
+*.py[cod]
+data/songnhat.db
+data/quarantine/quarantine_rows.csv

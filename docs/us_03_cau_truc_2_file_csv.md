@@ -1,55 +1,63 @@
-# Cấu trúc 2 file dữ liệu đầu vào (SongNhat AI-02)
+# US-03: Cấu trúc chuẩn 2 file CSV đầu vào
 
-Tài liệu này giải thích ý nghĩa từng cột trong 2 file CSV chuẩn UTF-8 đặt tại thư mục `data/raw/`.
-
----
-
-## 1. File `data/raw/enquiries_snapshot.csv`
-Lưu thông tin của từng yêu cầu hỏi mua thiết bị công nghiệp tại thời điểm tiếp nhận (`t0_time`).
-
-| Tên cột | Kiểu dữ liệu | Ý nghĩa dễ hiểu |
-|---|---|---|
-| `enquiry_id` | Chuỗi (Khóa chính) | Mã duy nhất của từng lượt hỏi mua (ví dụ: `SN-0001`). |
-| `account_key` | Chuỗi | Mã định danh khách hàng doanh nghiệp (không dùng tên riêng). |
-| `cohort` | Chuỗi | Nhóm dữ liệu: `TRAINING_CANDIDATE` (huấn luyện), `SEALED_LATER_TEST` (kiểm thử sau), `OPEN_24H` (mới trong 24h), `QUARANTINE_TEST` (dòng lỗi mẫu). |
-| `source` | Chuỗi | Nguồn gốc khách hàng biết đến công ty (`Website`, `Direct Sales`, `Referral`, `Trade Fair`). |
-| `t0_time` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm chốt mốc tính điểm theo giờ Việt Nam. Mọi dữ liệu sau mốc này đều không được dùng để chấm điểm. |
-| `extraction_time` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm trích xuất file dữ liệu. Dùng để kiểm tra dữ liệu có bị cũ quá 24 giờ hay không. |
-| `product_family` | Chuỗi | Nhóm thiết bị hỏi mua. Chỉ nhận 3 giá trị: `Motor_DongCo`, `Drive_BienTan`, `Transmission_HopSo`. |
-| `spec_completeness` | Chuỗi (`Yes`/`No`) | Khách đã cung cấp đủ thông số kỹ thuật hay chưa. |
-| `is_urgent_replacement` | Chuỗi (`Urgent`/`Normal`) | Khách có đang cần thay thế thiết bị gấp hay không. |
-| `contract_due_date` | Ngày (`YYYY-MM-DD`) | Hạn chót giao hàng/hợp đồng dự kiến của khách. |
-| `workflow_state` | Chuỗi | Trạng thái xử lý hiện tại trên hệ thống (`New`, `Contacted`, `Under_Review`, `Quoted`, `Closed`). Chỉ dùng để tham khảo khi xuất file, không dùng để tính điểm. |
-| `industry_at_t0` | Chuỗi | Ngành nghề của khách hàng tại thời điểm `t0_time`. |
-| `enquiry_channel_at_t0` | Chuỗi | Kênh khách hàng gửi yêu cầu (`Website`, `Email`, `Phone`, `Trade Fair`, `Referral`). |
-| `region_at_t0` | Chuỗi | Khu vực địa lý của khách hàng (`North`, `Central`, `South`). |
-| `account_age_days_at_t0` | Số nguyên | Số ngày khách hàng đã có tài khoản trên hệ thống tính đến `t0_time`. |
-| `prior_purchase_count_at_t0` | Số nguyên | Số lần khách hàng đã mua hàng trước thời điểm `t0_time`. |
-| `estimated_value_band_at_t0` | Chuỗi | Mức giá trị đơn hàng ước tính tại `t0_time`. |
-| `feature_event_time` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm phát sinh thông tin đầu vào (bắt buộc `<= t0_time`). |
-| `feature_available_at` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm hệ thống ghi nhận được thông tin đó (bắt buộc `<= t0_time`). |
-| `contact_phone_DO_NOT_USE` | Chuỗi | Số điện thoại liên hệ. **Cấm tuyệt đối** đưa vào biến tính điểm để bảo mật thông tin cá nhân. |
-| `latest_quote_value_post_t0_DO_NOT_USE` | Số thực | Giá trị báo giá phát sinh *sau* `t0_time`. **Cấm tuyệt đối** dùng để tính điểm vì làm lộ kết quả tương lai. |
-| `latest_quote_available_at_DO_NOT_USE` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm có báo giá *sau* `t0_time`. **Cấm tuyệt đối** dùng để tính điểm. |
+Tài liệu này khóa cứng cấu trúc dữ liệu đầu vào cho pipeline **SongNhat AI-02**, được sinh từ script `scripts/generate_songnhat_data.py` và kiểm tra bởi `scripts/us_03_check.py`.
 
 ---
 
-## 2. File `data/raw/outcome_events.csv`
-Lưu kết quả theo dõi trong vòng 60 ngày kể từ `t0_time` để biết khách hàng có chuyển đổi thành cơ hội bán hàng thực tế hay không.
+## 1. File `data/raw/enquiries_snapshot.csv` (**22 cột**, UTF-8)
 
-| Tên cột | Kiểu dữ liệu | Ý nghĩa dễ hiểu |
-|---|---|---|
-| `enquiry_id` | Chuỗi (Khóa ngoại) | Mã lượt hỏi mua, khớp 1-1 với file `enquiries_snapshot.csv`. |
-| `event_type` | Chuỗi | Loại sự kiện kết quả (`QUALIFICATION_CONFIRMED`, `60_DAY_MATURITY_NO_QUALIFICATION`, hoặc `PENDING_OBSERVATION` nếu chưa đủ 60 ngày). |
-| `event_time` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm xảy ra sự kiện xác nhận kết quả. |
-| `recorded_at` | Ngày giờ ISO 8601 (`+07:00`) | Thời điểm nhân viên ghi nhận kết quả lên hệ thống. |
-| `qualification_evidence` | Chuỗi | Mô tả bằng chứng xác nhận nhu cầu đủ điều kiện. |
-| `business_need_confirmed` | Chuỗi (`Yes`/`No`/`Unknown`) | Đã xác nhận đúng nhu cầu kinh doanh của khách chưa. |
-| `product_fit_confirmed` | Chuỗi (`Yes`/`No`/`Unknown`) | Thiết bị của công ty có phù hợp với yêu cầu của khách chưa. |
-| `agreed_next_step_confirmed` | Chuỗi (`Yes`/`No`/`Unknown`) | Khách và Sales đã chốt bước làm việc tiếp theo chưa. |
-| `observer_coverage` | Chuỗi | Mức độ theo dõi đủ 60 ngày (`Complete` hoặc `In_Progress`). |
-| `observation_window_days` | Số nguyên | Số ngày đã theo dõi (đủ chuẩn là `60`). |
-| `maturity_state` | Chuỗi | Trạng thái đủ 60 ngày (`MATURE`) hay chưa đủ (`IMMATURE`). |
-| `label` | Chuỗi | Nhãn kết quả cuối cùng: `POSITIVE` (chuyển đổi), `NEGATIVE` (không chuyển đổi), `Unknown` (chưa đủ 60 ngày). |
-| `correction_status` | Chuỗi | Trạng thái chỉnh sửa nhãn nếu có đính chính sau này. |
-| `cohort` | Chuỗi | Nhóm dữ liệu, khớp hoàn toàn với cột `cohort` bên file `enquiries_snapshot.csv`. |
+File chứa ảnh chụp các yêu cầu báo giá tại thời điểm `t0_time`. Khi nạp vào SQLite (`raw_enquiries` và `clean_enquiries`), hệ thống sẽ tự động loại bỏ 3 cột đánh dấu `*_DO_NOT_USE` để còn **19 cột** phục vụ chấm điểm.
+
+| STT | Tên cột | Kiểu dữ liệu | Dùng trong DB/Scoring | Mô tả |
+| :-: | :--- | :--- | :---: | :--- |
+| 1 | `enquiry_id` | `TEXT` (PK) | Có | Mã định danh yêu cầu báo giá (`SN-0001`...) |
+| 2 | `account_key` | `TEXT` | Có | Mã khách hàng doanh nghiệp (`ACCT-...`) |
+| 3 | `cohort` | `TEXT` | Có | Tập dữ liệu (`TRAINING_CANDIDATE`, `SEALED_LATER_TEST`, `OPEN_24H`) |
+| 4 | `source` | `TEXT` | Có | Hệ thống nguồn tiếp nhận |
+| 5 | `t0_time` | `TEXT` (ISO-8601) | Có | Thời điểm gốc phát sinh yêu cầu (bắt buộc hợp lệ) |
+| 6 | `extraction_time` | `TEXT` (ISO-8601) | Có | Thời điểm trích xuất dữ liệu (dùng kiểm tra freshness 24h) |
+| 7 | `product_family` | `TEXT` | Có | Nhóm sản phẩm (`Motor_DongCo`, `Drive_BienTan`, `Transmission_HopSo`) |
+| 8 | `spec_completeness` | `TEXT` | Có | Mức độ đầy đủ thông số kỹ thuật (`Full`, `Partial`, `Minimal`) |
+| 9 | `is_urgent_replacement` | `TEXT` | Có | Cờ thay thế khẩn cấp (`Urgent` / `Normal`) |
+| 10 | `contract_due_date` | `TEXT` (`YYYY-MM-DD`) | Có | Hạn giao hàng/hợp đồng cam kết (tên chuẩn thống nhất) |
+| 11 | `workflow_state` | `TEXT` | Có | Trạng thái xử lý (`New`, `Under_Review`, `Contacted`, `Quoted`, `Closed`) |
+| 12 | `industry_at_t0` | `TEXT` | Có | Ngành nghề khách hàng tại `t0_time` |
+| 13 | `enquiry_channel_at_t0` | `TEXT` | Có | Kênh tiếp nhận (`Direct_Sales`, `Email`, `Zalo`, `Website`...) |
+| 14 | `region_at_t0` | `TEXT` | Có | Khu vực địa lý tại `t0_time` |
+| 15 | `account_age_days_at_t0` | `INTEGER` | Có | Số ngày tuổi tài khoản khách hàng tại `t0_time` |
+| 16 | `prior_purchase_count_at_t0` | `INTEGER` | Có | Số lần mua hàng trước thời điểm `t0_time` |
+| 17 | `estimated_value_band_at_t0` | `TEXT` | Có | Nhóm giá trị ước tính (`High`, `Medium`, `Low`) |
+| 18 | `feature_event_time` | `TEXT` (ISO-8601) | Có | Thời điểm phát sinh đặc trưng |
+| 19 | `feature_available_at` | `TEXT` (ISO-8601) | Có | Thời điểm đặc trưng sẵn sàng (chống rò rỉ dữ liệu tương lai) |
+| 20 | `contact_phone_DO_NOT_USE` | `TEXT` | **Bị loại** | Số điện thoại liên hệ (PII — bị cắt bỏ khi nạp DB) |
+| 21 | `latest_quote_value_post_t0_DO_NOT_USE` | `TEXT` | **Bị loại** | Giá trị báo giá sau `t0` (gây data leakage — bị cắt bỏ) |
+| 22 | `latest_quote_available_at_DO_NOT_USE` | `TEXT` | **Bị loại** | Thời điểm báo giá sau `t0` (bị cắt bỏ khi nạp DB) |
+
+---
+
+## 2. File `data/raw/outcome_events.csv` (**14 cột**, UTF-8)
+
+File ghi nhận kết quả thẩm định cơ hội trong cửa sổ quan sát 60 ngày, được nạp nguyên vẹn **14 cột** vào bảng `raw_outcomes`.
+
+| STT | Tên cột | Kiểu dữ liệu | Mô tả |
+| :-: | :--- | :--- | :--- |
+| 1 | `enquiry_id` | `TEXT` (PK) | Khóa liên kết với `enquiries_snapshot.csv` |
+| 2 | `event_type` | `TEXT` | Loại sự kiện kết quả |
+| 3 | `event_time` | `TEXT` (ISO-8601) | Thời điểm ghi nhận sự kiện |
+| 4 | `recorded_at` | `TEXT` (ISO-8601) | Thời điểm lưu vào hệ thống |
+| 5 | `qualification_evidence` | `TEXT` | Bằng chứng thẩm định cơ hội |
+| 6 | `business_need_confirmed` | `TEXT` | Xác nhận nhu cầu kinh doanh |
+| 7 | `product_fit_confirmed` | `TEXT` | Xác nhận phù hợp sản phẩm |
+| 8 | `agreed_next_step_confirmed` | `TEXT` | Xác nhận bước tiếp theo với khách hàng |
+| 9 | `observer_coverage` | `TEXT` | Độ phủ quan sát |
+| 10 | `observation_window_days` | `INTEGER` | Cửa sổ quan sát (mặc định `60` ngày) |
+| 11 | `maturity_state` | `TEXT` | Trạng thái trưởng thành nhãn (`MATURE` / `IMMATURE`) |
+| 12 | `label` | `TEXT` | Nhãn kết quả (`POSITIVE`, `NEGATIVE`, `Unknown`) |
+| 13 | `correction_status` | `TEXT` | Trạng thái hiệu chỉnh nhãn |
+| 14 | `cohort` | `TEXT` | Tập dữ liệu tương ứng |
+
+---
+
+## 3. Quy tắc kiểm tra lỗi (Quarantine)
+
+- Các dòng thiếu `t0_time` hoặc sai định dạng ISO-8601 (ví dụ `ERR-0001` đến `ERR-0010`) sẽ không được nạp vào `raw_enquiries` mà được tách riêng ra `data/quarantine/quarantine_rows.csv` kèm cột `quarantine_reason`.

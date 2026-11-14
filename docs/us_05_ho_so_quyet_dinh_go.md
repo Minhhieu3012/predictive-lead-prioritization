@@ -1,10 +1,75 @@
-| # US-05 (`PLPT-13`): Hồ sơ Quyết định Phạm vi GO & Luận chứng Đầu tư (DEL 01)  **Dự án:** SongNhat AI-02 — Predictive Lead Prioritization  **Người soạn (Scrum Master / PO Lead):** Lại Đức Thành (Team 08)  **Ngày:** 14/11/2026 | **Phiên bản:** v1.0 (Bản hoàn chỉnh trình duyệt Gate GO)  ## 1. Tóm tắt điều hành  Tài liệu này tổng hợp toàn bộ kết quả giai đoạn Discovery (Sprint 1: `US-01` đến `US-04`) để trình các bên liên quan phê duyệt giai đoạn triển khai 12 tuần theo chiến lược **Rules-First** (xây dựng bộ quy tắc minh bạch trước, chỉ mở khóa mô hình dự đoán ML khi đạt đủ ngưỡng dữ liệu và hiệu quả kinh tế).  * **Xác nhận nút thắt:** Năng lực duyệt đơn của đội ngũ 20 nhân viên Sales SongNhat là **nút thắt vận hành thực sự (Có)** — xử lý thủ công 500 yêu cầu/tháng tốn 50 giờ, dễ bỏ sót đơn thay thế khẩn cấp và đơn sắp hết hạn hợp đồng.  * **Kiểm định dữ liệu (từ `US-03.py`):** **ĐẠT** ngưỡng Gate GO với **1.000 hồ sơ lịch sử trưởng thành** (`180 Positive`, `820 Negative`) và **200 hồ sơ kiểm thử độc lập** (`45 Positive`, `155 Negative`), không có rò rỉ dữ liệu sau `t0_time`.  * **Kinh tế (từ Annex E RFP):** Lộ trình **Rules** hoàn vốn trong **\~21,1 tháng**; phần tăng thêm của **Predictive (ML)** chỉ đáng đầu tư khi tạo ra tối thiểu **7,458 triệu VND/tháng** doanh thu đóng góp tăng thêm thực tế.  * **Khuyến nghị chốt:** **Phương án (a) — Triển khai đầy đủ theo chiến lược Rules-First** (đưa Rules Baseline vào vận hành ngay ở Sprint 2–3, đồng thời chạy thử nghiệm song song nhánh ML và chỉ phát hành ML ở Gate G1 nếu vượt Rules tối thiểu **1.20x**).  ## 2. Bối cảnh và Mục tiêu 12 tuần  * **Bối cảnh kinh doanh:** SongNhat phân phối động cơ điện (`Motor_DongCo`), biến tần (`Drive_BienTan`), hộp số truyền động (`Transmission_HopSo`) và dịch vụ bảo trì công nghiệp tại Việt Nam.  * **Quy trình hiện tại (As-is):** Nhân viên Sales tự đọc và phân loại thủ công các yêu cầu từ nhiều kênh (Email, Web Form, Zalo OA, Direct Sales), dễ bị trùng lặp khách hàng, chậm phản hồi các ca thay thế khẩn cấp và tốn nhiều thời gian tổng hợp danh sách mỗi sáng.  * **Mục tiêu 12 tuần (theo `US-01` & `US-02`):** Chuẩn hóa mốc `t0_time`, khung quan sát **60 ngày**, bộ tiêu chí Rubric 3 bằng chứng, giảm tối thiểu **20% thời gian chuẩn bị và phân loại hàng đợi** cho 20 nhân viên Sales (5 phiên đồng thời) mà không làm giảm tỷ lệ đúng hạn hợp đồng.  ## 3. Xác nhận Nút thắt: Năng lực duyệt đơn của Sales (Tham chiếu Annex E RFP)  | Chỉ số vận hành | Giá trị tham chiếu hiện tại | Mục tiêu sau triển khai | Nhận định |  | ----- | ----- | ----- | ----- |  | Lượng yêu cầu mới hàng tháng | \~500 hồ sơ/tháng (\~25 hồ sơ/ngày) | Gom trùng đa kênh, giữ nguyên đầu vào | Đủ lớn để gây ùn ứ nếu phân loại thủ công. |  | Thời gian phân loại mỗi hồ sơ | 6 phút / hồ sơ | **3 phút / hồ sơ** (giảm 50%) | Tiết kiệm **25 giờ công/tháng** (\~3,75 triệu VND). |  | Xử lý ca khẩn cấp & quá hạn | Dễ bị lẫn với đơn thường | Đẩy thẳng lên `TIER_0` & báo quá hạn sau 2 ngày | Bảo vệ cam kết SLA hợp đồng. |  | Dữ liệu lịch sử sẵn sàng (`US-03`) | **1.000 train** (`180+ / 820-`) & **200 test** (`45+ / 155-`) | Độ phủ nhãn đạt 100%, 0 rò rỉ `t0` | **Đủ chuẩn** cho cả Rules và đánh giá nhánh ML. |   **Kết luận:** Nút thắt vận hành đã được xác nhận rõ ràng. Áp dụng hệ thống xếp hạng Rules-First giúp giải phóng ngay **25 giờ/tháng** cho đội Sales ngay khi lên sóng.  ## 4. Phân tích Kinh tế & Ngưỡng hoàn vốn (Annex E RFP)  | Hạng mục tài chính | Lộ trình Rules (Bắt buộc) | Predictive ML (Phần tăng thêm trên nền Rules) |  | ----- | ----- | ----- |  | **Chi phí đầu tư ban đầu** | 30 triệu (nhà cung cấp) + 6 triệu (nội bộ) + 3 triệu (3 tháng chờ) = **39 triệu VND** | Tổng 141 triệu -> Tăng thêm **+102 triệu VND** so với Rules |  | **Chi phí vận hành hàng tháng** | 1 triệu (hệ thống) + 0,6 triệu (4 giờ kiểm tra) = **1,6 triệu/tháng** | Tổng 4,2 triệu -> Tăng thêm **+2,6 triệu/tháng** so với Rules |  | **Lợi ích tiết kiệm thời gian** | 25 giờ/tháng × 150.000đ = **3,75 triệu/tháng** (ròng **+2,15 triệu/tháng**) | Không giả định tiết kiệm thêm thời gian so với Rules |  | **Điểm hòa vốn / Ngưỡng yêu cầu** | Hoàn vốn sau **\~21,1 tháng** | Cần tối thiểu **≥ 7,458 triệu VND/tháng** đóng góp tăng thêm thực tế để hoàn vốn trong 24 tháng |   * **Phân tích độ nhạy:** Nếu chỉ dựa vào tiết kiệm thời gian làm việc, nhánh ML **không bao giờ tự hoàn vốn**. Do đó, việc triển khai **Rules trước** là bước đi an toàn tuyệt đối về mặt ROI; nhánh ML chỉ được phép lên Production khi chứng minh được hiệu quả thực tế vượt trội.  ## 5. Các phương án quyết định (Formal Gate GO)  | Phương án | Nội dung | Điều kiện áp dụng | Rủi ro chính |  | ----- | ----- | ----- | ----- |  | **(a) Triển khai đầy đủ (Rules-First + ML có điều kiện)** | Làm Rules ở Sprint 2–3; mở nhánh ML kiểm định ở Gate G1 | Nút thắt xác nhận; dữ liệu `US-03` đạt ≥1.000 train & ≥200 test | Mô hình ML không vượt được Rules 1.20x -> tự động quay về Rules (an toàn). |  | **(b) Chỉ triển khai Rules** | Chỉ làm đường ống dữ liệu + Rules Baseline | Nút thắt xác nhận nhưng dữ liệu lịch sử không đủ | Bỏ lỡ cơ hội tối ưu thêm nếu dữ liệu thực tế có tín hiệu tốt. |  | **(c) Dừng dự án** | Dừng sau Discovery | Sales xử lý kịp mọi đơn, không có nút thắt | Không áp dụng vì bài toán nút thắt & dữ liệu đã đạt. |   ## 6. Khuyến nghị chốt Gate GO  * **Phương án đề xuất:** **Chọn Phương án (a) — Triển khai 12 tuần theo chiến lược Rules-First + Nhánh ML có điều kiện.**  * **Lý do:** Toàn bộ 4 điều kiện tiền đề đã đạt (`US-01` chốt `t0`/`K`, `US-02` chốt Rubric 3 điều kiện, `US-03` vượt ngưỡng 1.000/200 hồ sơ với 0 rò rỉ, `US-04` hoàn tất rà soát pháp lý VN).  * **Điều kiện cổng cho ML tại Gate G1 (Tuần 6):** Mô hình Logistic Regression / Cây quyết định phải đạt `Precision@K ≥ 1.20x` so với Rules Baseline (khoảng tin cậy 95% > 0) trên tập test độc lập 200 mẫu, nếu không đạt hệ thống **tự động giữ nguyên Rules Baseline**.  * **Người chịu trách nhiệm đo lường:** Product Owner & Model Reviewer (độc lập).  ## 7. Rủi ro, Giả định & Biện pháp giảm thiểu  | Rủi ro / Giả định | Tác động | Biện pháp giảm thiểu (đã thiết kế ở `US-01`–`US-04`) |  | ----- | ----- | ----- |  | **Rò rỉ dữ liệu tương lai sau `t0`** | Điểm mô hình ảo, sai lệch thực tế | Khóa cứng `feature_event_time <= t0_time`; loại bỏ mọi cột `_DO_NOT_USE` và thông tin cá nhân (`US-03`, `US-04`). |  | **Dữ liệu nguồn trễ > 24h hoặc khách bị khiếu nại** | Sales gọi nhầm khách cũ / khách cấm liên hệ | Tự động khóa bảng (`HOLD_STALE_DATA`) khi dữ liệu > 24h và có nút **Chặn khẩn cấp** ngay trên giao diện (`PLPT-17`). |  | **Lộ lọt dữ liệu cá nhân / Vi phạm Luật VN** | Rủi ro pháp lý (Luật 91/2025 & 134/2025) | Tường lửa xóa tên/SĐT/email cá nhân; phân quyền 5 vai trò RBAC và quy trình báo sự cố trong **4 giờ** (`US-04`). |  | **Sales ghi đè thứ tự nhưng không hợp tác** | Không đo được hiệu quả thực tế | Bắt buộc chọn mã lý do khi ghi đè (`US-04`), không tự động lấy thao tác ghi đè làm nhãn huấn luyện. |   | 
+# US-05 (`PLPT-13`): Hồ sơ Quyết định Phạm vi GO & Luận chứng Đầu tư (DEL 01)
+
+**Dự án:** SongNhat AI-02 — Predictive Lead Prioritization   
+**Ngày:** 09/11/2026 | **Phiên bản:** v1.0 (Bản hoàn chỉnh trình duyệt Gate GO)
+
+## 1. Tóm tắt điều hành
+
+Tài liệu này tổng hợp toàn bộ kết quả giai đoạn Discovery (Sprint 1: `US-01` đến `US-04`) để trình các bên liên quan phê duyệt giai đoạn triển khai 12 tuần theo chiến lược **Rules-First** (xây dựng bộ quy tắc minh bạch trước, chỉ mở khóa mô hình dự đoán ML khi đạt đủ ngưỡng dữ liệu và hiệu quả kinh tế).
+
+* **Xác nhận nút thắt:** Năng lực duyệt đơn của đội ngũ 20 nhân viên Sales SongNhat là **nút thắt vận hành thực sự (Có)** — xử lý thủ công 500 yêu cầu/tháng tốn 50 giờ, dễ bỏ sót đơn thay thế khẩn cấp và đơn sắp hết hạn hợp đồng.
+* **Kiểm định dữ liệu (từ `US-03.py`):** **ĐẠT** ngưỡng Gate GO với **1.000 hồ sơ lịch sử trưởng thành** (`180 Positive`, `820 Negative`) và **200 hồ sơ kiểm thử độc lập** (`45 Positive`, `155 Negative`), không có rò rỉ dữ liệu sau `t0_time`.
+* **Kinh tế (từ Annex E RFP):** Lộ trình **Rules** hoàn vốn trong **~21,1 tháng**; phần tăng thêm của **Predictive (ML)** chỉ đáng đầu tư khi tạo ra tối thiểu **7,458 triệu VND/tháng** doanh thu đóng góp tăng thêm thực tế.
+* **Khuyến nghị chốt:** **Phương án (a) — Triển khai đầy đủ theo chiến lược Rules-First** (đưa Rules Baseline vào vận hành ngay ở Sprint 2–3, đồng thời chạy thử nghiệm song song nhánh ML và chỉ phát hành ML ở Gate G1 nếu vượt Rules tối thiểu **1.20x**).
+
+## 2. Bối cảnh và Mục tiêu 12 tuần
+
+* **Bối cảnh kinh doanh:** SongNhat phân phối động cơ điện (`Motor_DongCo`), biến tần (`Drive_BienTan`), hộp số truyền động (`Transmission_HopSo`) và dịch vụ bảo trì công nghiệp tại Việt Nam.
+* **Quy trình hiện tại (As-is):** Nhân viên Sales tự đọc và phân loại thủ công các yêu cầu từ nhiều kênh (Email, Web Form, Zalo OA, Direct Sales), dễ bị trùng lặp khách hàng, chậm phản hồi các ca thay thế khẩn cấp và tốn nhiều thời gian tổng hợp danh sách mỗi sáng.
+* **Mục tiêu 12 tuần (theo `US-01` & `US-02`):** Chuẩn hóa mốc `t0_time`, khung quan sát **60 ngày**, bộ tiêu chí Rubric 3 bằng chứng, giảm tối thiểu **20% thời gian chuẩn bị và phân loại hàng đợi** cho 20 nhân viên Sales (5 phiên đồng thời) mà không làm giảm tỷ lệ đúng hạn hợp đồng.
+
+## 3. Xác nhận Nút thắt: Năng lực duyệt đơn của Sales (Tham chiếu Annex E RFP)
+
+| Chỉ số vận hành | Giá trị tham chiếu hiện tại | Mục tiêu sau triển khai | Nhận định |
+| :--- | :--- | :--- | :--- |
+| Lượng yêu cầu mới hàng tháng | ~500 hồ sơ/tháng (~25 hồ sơ/ngày) | Gom trùng đa kênh, giữ nguyên đầu vào | Đủ lớn để gây ùn ứ nếu phân loại thủ công. |
+| Thời gian phân loại mỗi hồ sơ | 6 phút / hồ sơ | **3 phút / hồ sơ** (giảm 50%) | Tiết kiệm **25 giờ công/tháng** (~3,75 triệu VND). |
+| Xử lý ca khẩn cấp & quá hạn | Dễ bị lẫn với đơn thường | Đẩy thẳng lên `TIER_0` & báo quá hạn sau 2 ngày | Bảo vệ cam kết SLA hợp đồng. |
+| Dữ liệu lịch sử sẵn sàng (`US-03`) | **1.000 train** (`180+ / 820-`) & **200 test** (`45+ / 155-`) | Độ phủ nhãn đạt 100%, 0 rò rỉ `t0` | **Đủ chuẩn** cho cả Rules và đánh giá nhánh ML. |
+
+**Kết luận:** Nút thắt vận hành đã được xác nhận rõ ràng. Áp dụng hệ thống xếp hạng Rules-First giúp giải phóng ngay **25 giờ/tháng** cho đội Sales ngay khi lên sóng.
+
+## 4. Phân tích Kinh tế & Ngưỡng hoàn vốn (Annex E RFP)
+
+| Hạng mục tài chính | Lộ trình Rules (Bắt buộc) | Predictive ML (Phần tăng thêm trên nền Rules) |
+| :--- | :--- | :--- |
+| **Chi phí đầu tư ban đầu** | 30 triệu (nhà cung cấp) + 6 triệu (nội bộ) + 3 triệu (3 tháng chờ) = **39 triệu VND** | Tổng 141 triệu -> Tăng thêm **+102 triệu VND** so với Rules |
+| **Chi phí vận hành hàng tháng** | 1 triệu (hệ thống) + 0,6 triệu (4 giờ kiểm tra) = **1,6 triệu/tháng** | Tổng 4,2 triệu -> Tăng thêm **+2,6 triệu/tháng** so với Rules |
+| **Lợi ích tiết kiệm thời gian** | 25 giờ/tháng × 150.000đ = **3,75 triệu/tháng** (ròng **+2,15 triệu/tháng**) | Không giả định tiết kiệm thêm thời gian so với Rules |
+| **Điểm hòa vốn / Ngưỡng yêu cầu** | Hoàn vốn sau **~21,1 tháng** | Cần tối thiểu **≥ 7,458 triệu VND/tháng** đóng góp tăng thêm thực tế để hoàn vốn trong 24 tháng |
+
+* **Phân tích độ nhạy:** Nếu chỉ dựa vào tiết kiệm thời gian làm việc, nhánh ML **không bao giờ tự hoàn vốn**. Do đó, việc triển khai **Rules trước** là bước đi an toàn tuyệt đối về mặt ROI; nhánh ML chỉ được phép lên Production khi chứng minh được hiệu quả thực tế vượt trội.
+
+## 5. Các phương án quyết định (Formal Gate GO)
+
+| Phương án | Nội dung | Điều kiện áp dụng | Rủi ro chính |
+| :--- | :--- | :--- | :--- |
+| **(a) Triển khai đầy đủ (Rules-First + ML có điều kiện)** | Làm Rules ở Sprint 2–3; mở nhánh ML kiểm định ở Gate G1 | Nút thắt xác nhận; dữ liệu `US-03` đạt ≥1.000 train & ≥200 test | Mô hình ML không vượt được Rules 1.20x -> tự động quay về Rules (an toàn). |
+| **(b) Chỉ triển khai Rules** | Chỉ làm đường ống dữ liệu + Rules Baseline | Nút thắt xác nhận nhưng dữ liệu lịch sử không đủ | Bỏ lỡ cơ hội tối ưu thêm nếu dữ liệu thực tế có tín hiệu tốt. |
+| **(c) Dừng dự án** | Dừng sau Discovery | Sales xử lý kịp mọi đơn, không có nút thắt | Không áp dụng vì bài toán nút thắt & dữ liệu đã đạt. |
+
+## 6. Khuyến nghị chốt Gate GO
+
+* **Phương án đề xuất:** **Chọn Phương án (a) — Triển khai 12 tuần theo chiến lược Rules-First + Nhánh ML có điều kiện.**
+* **Lý do:** Toàn bộ 4 điều kiện tiền đề đã đạt (`US-01` chốt `t0`/`K`, `US-02` chốt Rubric 3 điều kiện, `US-03` vượt ngưỡng 1.000/200 hồ sơ với 0 rò rỉ, `US-04` hoàn tất rà soát pháp lý VN).
+* **Điều kiện cổng cho ML tại Gate G1 (Tuần 6):** Mô hình Logistic Regression / Cây quyết định phải đạt `Precision@K ≥ 1.20x` so với Rules Baseline (khoảng tin cậy 95% > 0) trên tập test độc lập 200 mẫu, nếu không đạt hệ thống **tự động giữ nguyên Rules Baseline**.
+* **Người chịu trách nhiệm đo lường:** Product Owner & Model Reviewer (độc lập).
+
+## 7. Rủi ro, Giả định & Biện pháp giảm thiểu
+
+| Rủi ro / Giả định | Tác động | Biện pháp giảm thiểu (đã thiết kế ở `US-01`–`US-04`) |
+| :--- | :--- | :--- |
+| **Rò rỉ dữ liệu tương lai sau `t0`** | Điểm mô hình ảo, sai lệch thực tế | Khóa cứng `feature_event_time <= t0_time`; loại bỏ mọi cột `_DO_NOT_USE` và thông tin cá nhân (`US-03`, `US-04`). |
+| **Dữ liệu nguồn trễ > 24h hoặc khách bị khiếu nại** | Sales gọi nhầm khách cũ / khách cấm liên hệ | Tự động khóa bảng (`HOLD_STALE_DATA`) khi dữ liệu > 24h và có nút **Chặn khẩn cấp** ngay trên giao diện (`PLPT-17`). |
+| **Lộ lọt dữ liệu cá nhân / Vi phạm Luật VN** | Rủi ro pháp lý (Luật 91/2025 & 134/2025) | Tường lửa xóa tên/SĐT/email cá nhân; phân quyền 5 vai trò RBAC và quy trình báo sự cố trong **4 giờ** (`US-04`). |
+| **Sales ghi đè thứ tự nhưng không hợp tác** | Không đo được hiệu quả thực tế | Bắt buộc chọn mã lý do khi ghi đè (`US-04`), không tự động lấy thao tác ghi đè làm nhãn huấn luyện. |
 
 ## 8. Xác nhận phê duyệt Gate GO
 
-| Vai trò | Phụ trách | Quyết định | Trạng thái | 
-| ----- | ----- | ----- | ----- | 
-| **Scrum Master / PO Lead** | Lại Đức Thành | Phương án (a) | Đã hoàn thiện hồ sơ DEL 01 (14/11/2026) | 
-| **Đại diện Sales Owner** | Minh Hiếu Phan | Phương án (a) | Chờ ký duyệt phiên Sprint Review | 
-| **Đại diện Kỹ thuật (Tech Lead)** | Quốc Khánh / Team 08 | Phương án (a) | Đã sẵn sàng triển khai Sprint 2 | 
-| **Nhà tài trợ (Purchaser Sponsor)** | Đại diện SongNhat | Phương án (a) | Trình duyệt Gate GO | 
+| Vai trò | Phụ trách | Quyết định | Trạng thái |
+| :--- | :--- | :--- | :--- |
+| **Product Owner (PO)** | Phan Minh Hiếu | Phương án (a) | Chờ ký duyệt phiên Sprint Review |
+| **Scrum Master (SM)** | Lại Đức Thành | Phương án (a) | Đã hoàn thiện hồ sơ DEL 01 (09/11/2026) |
+| **Lead Dev** | Nguyễn Tuấn Du | Phương án (a) | Đã sẵn sàng triển khai Sprint 2 |
+| **Dev (Team 08)** | Nguyễn Tuấn Kiệt, Phạm Nguyễn Gia Khang, Đoàn Trần Nguyên Khang, Trần Quốc Khánh, Nguyễn Tấn Tài, Đặng Nguyễn Mạnh Huỳnh | Phương án (a) | Đã sẵn sàng triển khai Sprint 2 |
+| **Nhà tài trợ (Purchaser Sponsor)** | Đại diện SongNhat | Phương án (a) | Trình duyệt Gate GO |

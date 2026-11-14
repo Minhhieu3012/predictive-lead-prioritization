@@ -1,7 +1,7 @@
 # US-01 (`PLPT-9`): Định nghĩa chuẩn Thời điểm `t0`, Khung 60 ngày & Công suất `K`
 
 **Dự án:** SongNhat AI-02 — Predictive Lead Prioritization  
-**Người thực hiện:** Lại Đức Thành (Team 08) | **Ngày:** 14/11/2026 | **Trạng thái:** Hoàn chỉnh (DEL 01)
+**Người thực hiện:** Phan Minh Hiếu (Team 08) | **Ngày:** 9/11/2026 | **Trạng thái:** Hoàn chỉnh
 
 ---
 

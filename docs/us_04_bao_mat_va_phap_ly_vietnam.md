@@ -1,8 +1,6 @@
 # US-04 (`PLPT-12`): Rà soát Pháp lý Việt Nam & Bảo mật Dữ liệu trước triển khai
 
 **Dự án:** SongNhat AI-02 — Predictive Lead Prioritization  
-**Người thực hiện:** Lại Đức Thành (Team 08) | **Ngày:** 14/11/2026 | **Trạng thái:** Hoàn chỉnh (DEL 01)
-
 ---
 
 ## 1. Tuân thủ Luật Bảo vệ Dữ liệu Cá nhân Việt Nam (Luật 91/2025/QH15 & NĐ 356/2025/ND-CP)

@@ -1,8 +1,6 @@
 # US-02 (`PLPT-10`): Bộ tiêu chí Chốt khách (Rubric) & Quy ước 3 Trạng thái Kết quả
 
 **Dự án:** SongNhat AI-02 — Predictive Lead Prioritization  
-**Người thực hiện:** Lại Đức Thành (Team 08) | **Ngày:** 14/11/2026 | **Trạng thái:** Hoàn chỉnh (DEL 01)
-
 ---
 
 ## 1. Bộ tiêu chí xác nhận Đạt chuẩn (Qualification Rubric — 3 điều kiện bắt buộc)

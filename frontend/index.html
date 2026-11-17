@@ -3,235 +3,549 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SongNhat AI-02 | Hàng đợi Báo giá & Kiểm soát An toàn (PLPT-17)</title>
+  <title>SongNhat AI-02 | Sales Workspace</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     body { margin: 0; padding: 24px; background: #f4f6f9; color: #1e293b; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
     .container { max-width: 1120px; margin: 0 auto; }
-    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
     .title { margin: 0; font-size: 20px; font-weight: 700; }
-    .meta { display: flex; align-items: center; gap: 10px; font-size: 14px; }
-    .badge { padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; }
-    .badge-ok { background: #dcfce7; color: #166534; }
-    .badge-hold { background: #fee2e2; color: #991b1b; }
-    .banner-hold {
-      display: none; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b;
-      padding: 14px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;
-    }
-    .card { background: #ffffff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
-    .block-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-    .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
-    .field label { font-size: 12px; font-weight: 600; color: #475569; }
-    .field input { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
-    button { padding: 9px 14px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
-    .btn-danger { background: #dc2626; color: #fff; }
-    .btn-danger:hover { background: #b91c1c; }
-    .btn-secondary { background: #e2e8f0; color: #1e293b; }
+    .subtitle { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+    .header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .btn { padding: 9px 14px; border: 1px solid #dbe3ec; border-radius: 7px; background: #fff; color: #1e293b; font-weight: 600; font-size: 13px; }
+    .btn:hover { background: #f8fafc; }
+    .btn-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-danger { border-color: #fecaca; color: #b91c1c; }
+    .btn-danger:hover { background: #fef2f2; }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-    th { background: #f8fafc; font-weight: 600; color: #475569; }
-    .tier0 { display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .msg { display: none; margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; }
-    .msg.ok { display: block; background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
-    .msg.err { display: block; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b; }
+    .notice { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e40af; margin-bottom: 16px; font-size: 13px; line-height: 1.55; }
+    .notice-icon { font-weight: 800; }
+    .notice p { margin: 0; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat, .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .stat { min-height: 100px; padding: 14px 16px; }
+    .stat-label { color: #64748b; font-size: 12px; font-weight: 600; }
+    .stat-value { display: block; margin-top: 5px; font-size: 22px; line-height: 1.2; }
+    .stat-note { margin-top: 6px; color: #64748b; font-size: 11px; }
+    .card { padding: 16px; margin-bottom: 16px; }
+    .block-panel summary { cursor: pointer; color: #334155; font-size: 13px; font-weight: 700; }
+    .block-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding-top: 14px; }
+    .field { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 170px; }
+    .field label { color: #475569; font-size: 12px; font-weight: 600; }
+    .field input, .search-input { width: 100%; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #1e293b; font-size: 13px; }
+    .field input:focus, .search-input:focus { outline: 2px solid #bfdbfe; border-color: #3b82f6; }
+    .message { display: none; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; margin: 12px 0; font-size: 13px; }
+    .message.show { display: block; }
+    .message.ok { border-color: #86efac; background: #dcfce7; color: #166534; }
+    .message.err { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+    .message.info { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+    .workspace-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .workspace-title { margin: 0; font-size: 16px; }
+    .workspace-copy { margin: 4px 0 0; color: #64748b; font-size: 12px; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 700; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-hold { background: #fee2e2; color: #991b1b; }
+    .tabs { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; margin-top: 18px; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #64748b; font-size: 13px; font-weight: 700; white-space: nowrap; }
+    .tab[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
+    .tab-count { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 11px; text-align: center; }
+    .tab[aria-selected="true"] .tab-count { background: #dbeafe; color: #1d4ed8; }
+    .search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 0; }
+    .search-wrap { position: relative; flex: 1; min-width: 220px; }
+    .search-icon { position: absolute; top: 8px; left: 10px; color: #64748b; }
+    .search-input { padding-left: 32px; }
+    .search-hint { color: #64748b; font-size: 11px; }
+    .stale-banner { display: none; padding: 12px 14px; border: 1px solid #ef4444; border-radius: 8px; background: #fef2f2; color: #991b1b; margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+    .stale-banner.show { display: block; }
+    .items { display: grid; gap: 10px; }
+    .lead-card { padding: 14px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
+    .lead-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; }
+    .lead-main { min-width: 220px; flex: 1; }
+    .lead-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
+    .tier0 { padding: 3px 7px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700; }
+    .lead-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: #64748b; font-size: 11px; }
+    .lead-meta strong { color: #475569; font-weight: 600; }
+    .lead-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+    .rank-box { min-width: 72px; text-align: center; }
+    .rank-label { display: block; color: #64748b; font-size: 10px; }
+    .rank-value { font-size: 18px; }
+    .score-box { min-width: 62px; text-align: center; }
+    .score-value { display: block; color: #1d4ed8; font-size: 21px; font-weight: 800; line-height: 1.1; }
+    .score-unit { color: #64748b; font-size: 10px; }
+    .work-order { padding: 5px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .factors { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; margin-top: 13px; }
+    .factors-label { padding-top: 6px; color: #475569; font-size: 11px; font-weight: 700; }
+    .factor { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+    .factor summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 9px; cursor: pointer; list-style: none; font-size: 11px; }
+    .factor summary::-webkit-details-marker { display: none; }
+    .factor-value { color: #1d4ed8; font-weight: 700; white-space: nowrap; }
+    .factor-detail { padding: 0 9px 8px; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+    .empty-state { padding: 34px 16px; border: 1px dashed #cbd5e1; border-radius: 9px; color: #64748b; text-align: center; font-size: 13px; }
+    .empty-state strong { display: block; margin-bottom: 5px; color: #334155; }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) {
+      body { padding: 14px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .card { padding: 13px; }
+      .lead-actions { justify-content: flex-start; }
+    }
+    @media (max-width: 440px) {
+      .stats { gap: 7px; }
+      .stat { min-height: 88px; padding: 11px; }
+      .stat-value { font-size: 19px; }
+      .tabs { gap: 14px; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1 class="title">SongNhat AI-02 — Hàng đợi Ưu tiên & Kiểm soát Khẩn cấp</h1>
-      <div class="meta">
-        <span>Tổng hợp lệ: <strong id="total-count">-</strong></span>
-        <span>Tuổi dữ liệu: <strong id="age-hours">-</strong> giờ</span>
-        <span id="status-badge" class="badge badge-ok">Đang tải...</span>
-        <button type="button" class="btn-secondary btn-sm" onclick="loadQueue()">Làm mới</button>
+  <main class="container">
+    <header class="header">
+      <div>
+        <h1 class="title">SongNhat AI-02 — Sales Workspace</h1>
+        <p class="subtitle">Không gian ưu tiên và rà soát hồ sơ báo giá</p>
       </div>
-    </div>
-
-    <div id="stale-banner" class="banner-hold"></div>
-
-    <div class="card">
-      <div class="block-form">
-        <div class="field">
-          <label for="enquiry_id">Mã hồ sơ (enquiry_id)</label>
-          <input id="enquiry_id" type="text" placeholder="Ví dụ: SN-0610" />
-        </div>
-        <div class="field">
-          <label for="account_key">Mã khách hàng (account_key)</label>
-          <input id="account_key" type="text" placeholder="Ví dụ: ACCT-0714" />
-        </div>
-        <div class="field">
-          <label for="reason">Lý do chặn khẩn cấp</label>
-          <input id="reason" type="text" value="Chặn khẩn cấp theo yêu cầu PO" />
-        </div>
-        <button type="button" class="btn-danger" onclick="submitBlock()">Chặn khẩn cấp</button>
+      <div class="header-actions">
+        <details class="block-panel card">
+          <summary>Chặn khẩn cấp</summary>
+          <form id="block-form" class="block-form">
+            <div class="field">
+              <label for="enquiry-id">Mã hồ sơ</label>
+              <input id="enquiry-id" name="enquiry_id" type="text" placeholder="Ví dụ: SN-0610" />
+            </div>
+            <div class="field">
+              <label for="account-key">Mã khách hàng</label>
+              <input id="account-key" name="account_key" type="text" placeholder="Ví dụ: ACCT-0714" />
+            </div>
+            <div class="field">
+              <label for="block-reason">Lý do chặn</label>
+              <input id="block-reason" name="reason" type="text" value="Chặn khẩn cấp theo yêu cầu PO" />
+            </div>
+            <button class="btn btn-danger" type="submit">Xác nhận chặn</button>
+          </form>
+        </details>
+        <button id="create-snapshot" class="btn btn-primary" type="button" hidden>Tạo queue hôm nay</button>
+        <button id="refresh" class="btn" type="button">Làm mới</button>
       </div>
-      <div id="action-msg" class="msg"></div>
-    </div>
+    </header>
 
-    <div class="card" id="queue-card">
-      <table>
-        <thead>
-          <tr>
-            <th>Hạng</th>
-            <th>Mã hồ sơ</th>
-            <th>Khách hàng</th>
-            <th>Điểm Rules</th>
-            <th>Ưu tiên</th>
-            <th>Lý do giải thích (tối đa 3)</th>
-            <th>Thao tác</th>
-          </tr>
-        </thead>
-        <tbody id="queue-body"></tbody>
-      </table>
-    </div>
-  </div>
+    <div id="action-message" class="message" role="status" aria-live="polite"></div>
+    <div id="stale-banner" class="stale-banner" role="alert"></div>
+
+    <section class="notice" aria-label="Giải thích điểm">
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <p><strong>Điểm là tín hiệu ưu tiên, không phải xác suất thắng.</strong>
+        Các yếu tố đóng góp mô tả cách bộ quy tắc thống kê tạo điểm; chúng không chứng minh
+        quan hệ nhân quả và không đảm bảo kết quả bán hàng.</p>
+    </section>
+
+    <section class="stats" aria-label="Tổng quan workspace">
+      <article class="stat">
+        <span class="stat-label">Hồ sơ trong chế độ xem</span>
+        <strong id="stat-total" class="stat-value">—</strong>
+        <div id="stat-status" class="stat-note">Đang tải dữ liệu</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Được xếp lịch hôm nay</span>
+        <strong id="stat-scheduled" class="stat-value">—</strong>
+        <div id="stat-capacity" class="stat-note">Capacity K = —</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Khám phá ngẫu nhiên</span>
+        <strong id="stat-exploration" class="stat-value">—</strong>
+        <div class="stat-note">Trong các suất duyệt tùy nghi</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Tuổi snapshot nguồn</span>
+        <strong id="stat-snapshot-age" class="stat-value">—</strong>
+        <div id="stat-score-mode" class="stat-note">RULES_BASELINE</div>
+      </article>
+    </section>
+
+    <section class="card" aria-labelledby="workspace-title">
+      <div class="workspace-head">
+        <div>
+          <h2 id="workspace-title" class="workspace-title">Active Queue</h2>
+          <p id="workspace-copy" class="workspace-copy">
+            Hồ sơ đã chấm điểm; hồ sơ deferred vẫn được giữ lại và có thể tìm kiếm.
+          </p>
+        </div>
+        <span id="status-badge" class="badge">Đang tải...</span>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Chế độ xem hồ sơ">
+        <button class="tab" id="tab-active" role="tab" aria-selected="true" aria-controls="queue-panel" data-view="Active">
+          Active Queue <span class="tab-count" id="count-active">—</span>
+        </button>
+        <button class="tab" id="tab-unscored" role="tab" aria-selected="false" aria-controls="queue-panel" data-view="Unscored">
+          Unscored Records <span class="tab-count" id="count-unscored">—</span>
+        </button>
+        <button class="tab" id="tab-quarantine" role="tab" aria-selected="false" aria-controls="queue-panel" data-view="Quarantine">
+          Quarantine Records <span class="tab-count" id="count-quarantine">—</span>
+        </button>
+      </nav>
+
+      <div class="search-row">
+        <label class="search-wrap" for="search-input">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="search-input" class="search-input" type="search" autocomplete="off"
+            placeholder="Tìm mã hồ sơ, cohort, owner, yếu tố đóng góp..." />
+        </label>
+        <span class="search-hint">Tìm kiếm hỗ trợ tiếng Việt không dấu</span>
+      </div>
+      <div id="view-note" class="workspace-copy" hidden></div>
+      <div id="queue-panel" role="tabpanel" aria-labelledby="tab-active">
+        <div id="queue-list" class="items" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
 
   <script>
     const API_BASE = "http://127.0.0.1:8000";
-    let msgTimer = null;
+    const API_LIMIT = 1000;
+    const VIEW_TITLES = {
+      Active: "Active Queue",
+      Unscored: "Unscored Records",
+      Quarantine: "Quarantine Records"
+    };
+    const FACTOR_LABELS = {
+      product_fit: "Độ phù hợp sản phẩm",
+      spec_completeness: "Mức đầy đủ thông số",
+      value_band: "Nhóm giá trị ước tính",
+      account_relationship: "Quan hệ tài khoản",
+      channel_source: "Kênh tiếp nhận"
+    };
 
-    function clearMessage() {
-      const msgEl = document.getElementById("action-msg");
-      msgEl.className = "msg";
-      msgEl.textContent = "";
-      sessionStorage.removeItem("last_block_msg");
+    let activeView = "Active";
+    let currentPayload = null;
+    let actionMessageTimer = null;
+
+    const $ = id => document.getElementById(id);
+
+    function normalizeSearch(value) {
+      return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[đĐ]/g, "d")
+        .toLocaleLowerCase("vi")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function makeElement(tag, className, text) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined && text !== null) element.textContent = text;
+      return element;
+    }
+
+    function formatSnapshotAge(seconds) {
+      if (seconds === null || seconds === undefined) return "—";
+      const hours = Number(seconds) / 3600;
+      return `${hours.toFixed(2)} giờ`;
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return "Chưa có timestamp nguồn";
+      const timestamp = new Date(value);
+      if (Number.isNaN(timestamp.getTime())) return String(value);
+      return timestamp.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+    }
+
+    function formatDate(value) {
+      if (!value) return "Chưa có hạn hợp đồng";
+      const date = new Date(`${value}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }).format(date);
     }
 
     function showMessage(type, text, durationMs = 0) {
-      const msgEl = document.getElementById("action-msg");
-      msgEl.className = `msg ${type}`;
-      msgEl.textContent = text;
-
-      if (msgTimer) {
-        clearTimeout(msgTimer);
-        msgTimer = null;
-      }
-
+      const message = $("action-message");
+      message.className = `message show ${type}`;
+      message.textContent = text;
+      if (actionMessageTimer) clearTimeout(actionMessageTimer);
       if (durationMs > 0) {
-        const expiresAt = Date.now() + durationMs;
-        sessionStorage.setItem("last_block_msg", JSON.stringify({ type, text, expiresAt }));
-        msgTimer = setTimeout(clearMessage, durationMs);
+        actionMessageTimer = setTimeout(() => {
+          message.className = "message";
+          message.textContent = "";
+        }, durationMs);
       }
     }
 
-    function restorePersistedMessage() {
-      const saved = sessionStorage.getItem("last_block_msg");
-      if (!saved) return;
-      try {
-        const parsed = JSON.parse(saved);
-        const remaining = (parsed.expiresAt || 0) - Date.now();
-        if (remaining > 0 && parsed.text) {
-          const msgEl = document.getElementById("action-msg");
-          msgEl.className = `msg ${parsed.type || "ok"}`;
-          msgEl.textContent = parsed.text;
-          if (msgTimer) clearTimeout(msgTimer);
-          msgTimer = setTimeout(clearMessage, remaining);
-        } else {
-          sessionStorage.removeItem("last_block_msg");
-        }
-      } catch (_) {}
+    function getSearchText(item) {
+      const factors = (item.contributing_factors || [])
+        .map(factor => [factor.factor, factor.value, factor.reason, factor.source_timestamp].join(" "))
+        .join(" ");
+      return normalizeSearch([
+        item.enquiry_id,
+        item.account_key,
+        item.cohort_id,
+        item.owner,
+        item.score_mode,
+        item.contract_due_date,
+        item.quarantine_reason,
+        item.unscored_reason,
+        item.allocation_type,
+        factors
+      ].join(" "));
+    }
+
+    function renderFactor(factor) {
+      const details = makeElement("details", "factor");
+      const summary = makeElement("summary");
+      summary.append(
+        makeElement("span", "", FACTOR_LABELS[factor.factor] || factor.factor || "Yếu tố"),
+        makeElement("strong", "factor-value", `+${factor.value ?? 0} pts`)
+      );
+      const detail = makeElement("div", "factor-detail");
+      if (factor.reason) detail.append(makeElement("div", "", factor.reason));
+      detail.append(makeElement(
+        "div",
+        "",
+        `${factor.source_timestamp_field || "Nguồn thời gian"} · ${formatTimestamp(factor.source_timestamp)}`
+      ));
+      details.append(summary, detail);
+      return details;
+    }
+
+    function setBlockTarget(item) {
+      $("enquiry-id").value = item.enquiry_id || "";
+      $("account-key").value = item.account_key || "";
+      document.querySelector(".block-panel").open = true;
+      $("block-reason").focus();
+    }
+
+    function renderItem(item) {
+      const article = makeElement("article", "lead-card");
+      const top = makeElement("div", "lead-top");
+      const main = makeElement("div", "lead-main");
+      const title = makeElement("h3", "lead-title");
+      title.append(makeElement("span", "", item.enquiry_id || "Không có mã hồ sơ"));
+      if (item.allocation_type === "MANDATORY") {
+        title.append(makeElement("span", "tier0", "Tier 0 · Bắt buộc"));
+      }
+
+      const meta = makeElement("div", "lead-meta");
+      meta.append(
+        makeElement("span", "", `Cohort: ${item.cohort_id || "—"}`),
+        makeElement("span", "", `Owner: ${item.owner || "Chưa phân công"}`)
+      );
+      if (item.contract_due_date) {
+        meta.append(makeElement("span", "", `Hạn hợp đồng: ${formatDate(item.contract_due_date)}`));
+      }
+      if (item.quarantine_reason) {
+        meta.append(makeElement("span", "", `Lý do quarantine: ${item.quarantine_reason}`));
+      }
+      if (item.unscored_reason) {
+        meta.append(makeElement("span", "", item.unscored_reason));
+      }
+      main.append(title, meta);
+
+      const actions = makeElement("div", "lead-actions");
+      const rankBox = makeElement("div", "rank-box");
+      rankBox.append(
+        makeElement("span", "rank-label", "Model rank"),
+        makeElement("strong", "rank-value", item.model_rank == null ? "—" : `#${item.model_rank}`)
+      );
+      const scoreBox = makeElement("div", "score-box");
+      scoreBox.append(
+        makeElement("strong", "score-value", item.score == null ? "—" : String(item.score)),
+        makeElement("span", "score-unit", item.score_unit || "")
+      );
+      actions.append(rankBox, scoreBox);
+      if (item.final_work_order != null) {
+        actions.append(makeElement("span", "work-order", `Work order ${item.final_work_order}`));
+      }
+      if (activeView === "Active") {
+        const blockButton = makeElement("button", "btn btn-danger btn-sm", "Chặn");
+        blockButton.type = "button";
+        blockButton.setAttribute("aria-label", `Chặn khẩn cấp ${item.enquiry_id}`);
+        blockButton.addEventListener("click", () => setBlockTarget(item));
+        actions.append(blockButton);
+      }
+      top.append(main, actions);
+      article.append(top);
+
+      const factors = item.contributing_factors || [];
+      if (factors.length) {
+        const factorRow = makeElement("div", "factors");
+        factorRow.append(makeElement("span", "factors-label", "Yếu tố đóng góp:"));
+        factors.slice(0, 3).forEach(factor => factorRow.append(renderFactor(factor)));
+        article.append(factorRow);
+      }
+
+      const footer = makeElement("div", "lead-meta");
+      if (item.score_mode) footer.append(makeElement("span", "badge", item.score_mode));
+      if (item.allocation_type && item.allocation_type !== "MANDATORY") {
+        footer.append(makeElement("span", "badge", item.allocation_type));
+      }
+      if (footer.childNodes.length) {
+        footer.style.marginTop = "10px";
+        article.append(footer);
+      }
+      return article;
+    }
+
+    function renderQueue() {
+      const list = $("queue-list");
+      list.replaceChildren();
+      if (!currentPayload) return;
+
+      const query = normalizeSearch($("search-input").value);
+      const items = (currentPayload.items || []).filter(item =>
+        !query || getSearchText(item).includes(query)
+      );
+      if (!items.length) {
+        const empty = makeElement("div", "empty-state");
+        const heading = activeView === "Active" && currentPayload.status === "NO_DAILY_SNAPSHOT"
+          ? "Chưa có snapshot queue hôm nay"
+          : `Không có hồ sơ trong ${VIEW_TITLES[activeView]}`;
+        empty.append(makeElement("strong", "", heading));
+        empty.append(makeElement(
+          "span",
+          "",
+          query ? "Thử từ khóa khác hoặc tìm bằng tiếng Việt không dấu." : "Dữ liệu sẽ xuất hiện khi có hồ sơ phù hợp."
+        ));
+        list.append(empty);
+        return;
+      }
+      items.forEach(item => list.append(renderItem(item)));
+    }
+
+    function updateSummary(payload) {
+      $("stat-total").textContent = String(payload.total ?? 0);
+      $("stat-status").textContent = `${activeView} · ${payload.status || "—"}`;
+      $("stat-scheduled").textContent = String(payload.scheduled_today ?? 0);
+      $("stat-capacity").textContent = `Capacity K = ${payload.capacity_k ?? "—"}`;
+      $("stat-exploration").textContent = String(payload.exploration_slots ?? 0);
+      $("stat-snapshot-age").textContent = formatSnapshotAge(payload.snapshot_age);
+      const itemWithMode = (payload.items || []).find(item => item.score_mode);
+      $("stat-score-mode").textContent = itemWithMode?.score_mode || "—";
+      $("status-badge").textContent = payload.status || "—";
+      const badgeState = payload.status === "HELD_STALE_DATA" ||
+        payload.status === "QUARANTINE_SOURCE_UNAVAILABLE"
+        ? "badge-hold"
+        : payload.status === "CAPACITY_EXCEEDED"
+          ? "badge-warn"
+          : "badge-ok";
+      $("status-badge").className = `badge ${badgeState}`;
+      $("count-active").textContent = activeView === "Active" ? String(payload.total ?? 0) : "—";
+      $("count-unscored").textContent = activeView === "Unscored" ? String(payload.total ?? 0) : "—";
+      $("count-quarantine").textContent = activeView === "Quarantine" ? String(payload.total ?? 0) : "—";
+      $("create-snapshot").hidden = !(
+        activeView === "Active" && payload.status === "NO_DAILY_SNAPSHOT"
+      );
+      const banner = $("stale-banner");
+      banner.classList.toggle("show", payload.status === "HELD_STALE_DATA");
+      banner.textContent = payload.status === "HELD_STALE_DATA"
+        ? "Dữ liệu nguồn quá hạn 24 giờ. Active Queue tạm khóa để đảm bảo an toàn vận hành."
+        : "";
+      const viewNote = $("view-note");
+      if (activeView === "Unscored" && payload.classification_basis) {
+        viewNote.textContent = `Phân loại hiện tại: ${payload.classification_basis}.`;
+        viewNote.hidden = false;
+      } else if (activeView === "Quarantine" && payload.view_source_available === false) {
+        viewNote.textContent = "Không tìm thấy nguồn dữ liệu quarantine.";
+        viewNote.hidden = false;
+      } else {
+        viewNote.textContent = "";
+        viewNote.hidden = true;
+      }
     }
 
     async function loadQueue() {
-      restorePersistedMessage();
+      $("status-badge").textContent = "Đang tải...";
       try {
-        const res = await fetch(`${API_BASE}/api/queue?limit=20`);
-        const data = await res.json();
-
-        document.getElementById("total-count").textContent = data.total ?? 0;
-        document.getElementById("age-hours").textContent = data.source_age_hours ?? "-";
-
-        const badge = document.getElementById("status-badge");
-        const banner = document.getElementById("stale-banner");
-        const queueCard = document.getElementById("queue-card");
-        const isHeld = data.status === "HELD_STALE_DATA" || data.locked === true;
-
-        badge.textContent = data.status;
-        badge.className = `badge ${isHeld ? "badge-hold" : "badge-ok"}`;
-
-        if (isHeld) {
-          banner.style.display = "block";
-          banner.textContent = data.warning || "CẢNH BÁO: Dữ liệu nguồn quá hạn 24 giờ. Hàng đợi đã tự động khóa (HELD_STALE_DATA).";
-          queueCard.style.display = "none";
-          return;
-        }
-
-        banner.style.display = "none";
-        queueCard.style.display = "block";
-
-        const items = data.items || [];
-        const tbody = document.getElementById("queue-body");
-        tbody.innerHTML = "";
-
-        if (items.length > 0 && !document.getElementById("enquiry_id").value) {
-          document.getElementById("enquiry_id").placeholder = `Ví dụ: ${items[0].enquiry_id}`;
-          document.getElementById("account_key").placeholder = `Ví dụ: ${items[0].account_key}`;
-        }
-
-        for (const row of items) {
-          const tr = document.createElement("tr");
-          const reasonsHtml = (row.reasons || []).map(r => `<div>• ${r}</div>`).join("");
-          tr.innerHTML = `
-            <td><strong>#${row.final_rank}</strong></td>
-            <td>${row.enquiry_id}</td>
-            <td>${row.account_key}</td>
-            <td>${row.rule_score}</td>
-            <td>${row.is_urgent ? '<span class="tier0">TIER 0</span>' : 'STANDARD'}</td>
-            <td>${reasonsHtml}</td>
-            <td>
-              <button type="button" class="btn-danger btn-sm" onclick="quickBlock('${row.enquiry_id}', '${row.account_key}')">
-                Chặn
-              </button>
-            </td>
-          `;
-          tbody.appendChild(tr);
-        }
-      } catch (err) {
-        showMessage("err", "Không kết nối được API tại http://127.0.0.1:8000. Hãy chắc chắn Uvicorn đang chạy.", 0);
+        const url = `${API_BASE}/api/v1/workspace/queue?view=${encodeURIComponent(activeView)}&limit=${API_LIMIT}`;
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        currentPayload = payload;
+        updateSummary(payload);
+        renderQueue();
+      } catch (error) {
+        currentPayload = null;
+        $("queue-list").replaceChildren();
+        $("status-badge").textContent = "Lỗi kết nối";
+        $("status-badge").className = "badge badge-hold";
+        showMessage("err", `Không tải được Sales Workspace: ${error.message}`);
       }
     }
 
-    async function quickBlock(enqId, acctKey) {
-      document.getElementById("enquiry_id").value = enqId;
-      document.getElementById("account_key").value = acctKey;
-      await submitBlock();
+    async function createDailySnapshot() {
+      const button = $("create-snapshot");
+      button.disabled = true;
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/workspace/queue/daily`, {
+          method: "POST"
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        showMessage("ok", "Đã tạo snapshot queue hôm nay.", 2500);
+        await loadQueue();
+      } catch (error) {
+        showMessage("err", `Không tạo được snapshot: ${error.message}`);
+      } finally {
+        button.disabled = false;
+      }
     }
 
-    async function submitBlock() {
-      const enquiry_id = document.getElementById("enquiry_id").value.trim();
-      const account_key = document.getElementById("account_key").value.trim();
-      const reason = document.getElementById("reason").value.trim();
-
+    async function submitBlock(event) {
+      event.preventDefault();
+      const enquiry_id = $("enquiry-id").value.trim();
+      const account_key = $("account-key").value.trim();
+      const reason = $("block-reason").value.trim();
       if (!enquiry_id && !account_key) {
-        showMessage("err", "Vui lòng nhập mã hồ sơ (SN-...) hoặc mã khách hàng (ACCT-...).", 0);
+        showMessage("err", "Vui lòng nhập mã hồ sơ hoặc mã khách hàng.");
         return;
       }
-
       try {
-        const res = await fetch(`${API_BASE}/api/block`, {
+        const response = await fetch(`${API_BASE}/api/block`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enquiry_id, account_key, reason })
         });
-        const result = await res.json();
-        if (!res.ok) {
-          showMessage("err", result.detail || "Chặn thất bại.", 0);
-          return;
-        }
-        showMessage(
-          "ok",
-          `Đã chặn thành công: ${result.enquiry_id || ""} / ${result.account_key || ""} — Hồ sơ đã biến mất khỏi hàng đợi.`,
-          2000
-        );
-        document.getElementById("enquiry_id").value = "";
-        document.getElementById("account_key").value = "";
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        showMessage("ok", "Đã chặn; hồ sơ được loại khỏi Active Queue.", 2500);
+        $("enquiry-id").value = "";
+        $("account-key").value = "";
         await loadQueue();
-      } catch (err) {
-        showMessage("err", "Lỗi kết nối khi gọi POST /api/block.", 0);
+      } catch (error) {
+        showMessage("err", `Chặn hồ sơ thất bại: ${error.message}`);
       }
     }
+
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        activeView = tab.dataset.view;
+        document.querySelectorAll(".tab").forEach(candidate => {
+          candidate.setAttribute("aria-selected", String(candidate === tab));
+        });
+        $("workspace-title").textContent = VIEW_TITLES[activeView];
+        $("queue-panel").setAttribute("aria-labelledby", tab.id);
+        $("workspace-copy").textContent = activeView === "Active"
+          ? "Hồ sơ đã chấm điểm; hồ sơ deferred vẫn được giữ lại và có thể tìm kiếm."
+          : activeView === "Unscored"
+            ? "Hồ sơ chưa có kết quả scoring trong snapshot queue hiện tại."
+            : "Hồ sơ bị cách ly khi kiểm tra dữ liệu, kèm lý do nếu có.";
+        $("search-input").value = "";
+        loadQueue();
+      });
+    });
+
+    $("search-input").addEventListener("input", renderQueue);
+    $("refresh").addEventListener("click", loadQueue);
+    $("create-snapshot").addEventListener("click", createDailySnapshot);
+    $("block-form").addEventListener("submit", submitBlock);
 
     loadQueue();
   </script>

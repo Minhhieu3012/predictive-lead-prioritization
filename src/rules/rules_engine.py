@@ -6,34 +6,27 @@ from typing import Any
 RULES_LABEL = "RULES_BASELINE"
 VN_TZ = timezone(timedelta(hours=7))
 
-# Tổng trọng số: 100 điểm
+# Tổng trọng số: 100 điểm (theo docs/us_02_tieu_chi_rubric_va_trang_thai.md)
 WEIGHTS = {
     "product_fit": 30,
     "spec_completeness": 25,
-    "value_band": 20,
-    "account_relationship": 15,
-    "channel_source": 10,
+    "enquiry_age": 20,
+    "sla_urgency": 25,
 }
 
 PRODUCT_SCORES = {
     "Motor_DongCo": 30,
-    "Drive_BienTan": 28,
-    "Transmission_HopSo": 25,
+    "Drive_BienTan": 30,
+    "Transmission_HopSo": 30,
     "Industrial Pump": 30,
-    "Packaging Line": 28,
-    "Spare Parts": 25,
+    "Packaging Line": 30,
+    "Spare Parts": 30,
 }
 
 SPEC_SCORES = {
     "Full": 25,
-    "Partial": 12,
-    "Minimal": 0,
-}
-
-VALUE_BAND_SCORES = {
-    "High": 20,
-    "Medium": 12,
-    "Low": 5,
+    "Partial": 15,
+    "Minimal": 5,
 }
 
 
@@ -71,7 +64,7 @@ def _parse_date(value: Any) -> date | None:
 
 def _score_spec_completeness(raw_val: Any) -> tuple[int, str]:
     if raw_val is None:
-        return 0, "Thong so ky thuat: Minimal (+0d)"
+        return 5, "Thong so ky thuat: Minimal (+5d)"
     s = str(raw_val).strip()
     if s in SPEC_SCORES:
         pts = SPEC_SCORES[s]
@@ -80,61 +73,49 @@ def _score_spec_completeness(raw_val: Any) -> tuple[int, str]:
     if low in {"yes", "true", "1", "complete", "completed", "full", "100", "100%", "complete specifications"}:
         return 25, "Thong so ky thuat: Full (+25d)"
     if low in {"partial", "medium", "50%"}:
-        return 12, "Thong so ky thuat: Partial (+12d)"
-    return 0, "Thong so ky thuat: Minimal (+0d)"
+        return 15, "Thong so ky thuat: Partial (+15d)"
+    return 5, "Thong so ky thuat: Minimal (+5d)"
 
 
-def _score_value_band(enquiry: dict[str, Any]) -> tuple[int, str]:
-    band = str(_first_value(enquiry, "estimated_value_band_at_t0", "value_band") or "").strip()
-    if band in VALUE_BAND_SCORES:
-        pts = VALUE_BAND_SCORES[band]
-        return pts, f"Gia tri uoc tinh: {band} (+{pts}d)"
-    if band.lower() == "high":
-        return 20, "Gia tri uoc tinh: High (+20d)"
-    if band.lower() == "medium":
-        return 12, "Gia tri uoc tinh: Medium (+12d)"
-    if band.lower() == "low":
-        return 5, "Gia tri uoc tinh: Low (+5d)"
-    return 0, "Gia tri uoc tinh: Unknown (+0d)"
+def _score_enquiry_age(enquiry: dict[str, Any], now_dt: datetime) -> tuple[int, str]:
+    t0_dt = _parse_datetime(_first_value(enquiry, "t0_time", "feature_event_time"))
+    if t0_dt is None:
+        return 5, "Tuoi ho so: < 1 ngay (+5d)"
+    age_days = (now_dt - t0_dt).total_seconds() / 86400.0
+    if age_days >= 7.0:
+        return 20, f"Tuoi ho so: >= 7 ngay ({int(age_days)} ngay) (+20d)"
+    if age_days >= 3.0:
+        return 15, f"Tuoi ho so: >= 3 ngay ({int(age_days)} ngay) (+15d)"
+    if age_days >= 1.0:
+        return 10, f"Tuoi ho so: >= 1 ngay ({int(age_days)} ngay) (+10d)"
+    return 5, "Tuoi ho so: < 1 ngay (+5d)"
 
 
-def _score_account_relationship(enquiry: dict[str, Any]) -> tuple[int, str]:
-    try:
-        prior = int(enquiry.get("prior_purchase_count_at_t0") or 0)
-    except (ValueError, TypeError):
-        prior = 0
-    try:
-        age_days = int(enquiry.get("account_age_days_at_t0") or 0)
-    except (ValueError, TypeError):
-        age_days = 0
-
-    if prior >= 3 or age_days >= 365:
-        return 15, f"Khach hang than thiet (mua {prior} lan, {age_days} ngay) (+15d)"
-    if prior >= 1 or age_days >= 90:
-        return 10, f"Khach hang hien huu (mua {prior} lan, {age_days} ngay) (+10d)"
-    return 5, "Khach hang moi (+5d)"
-
-
-def _score_channel_source(enquiry: dict[str, Any]) -> tuple[int, str]:
-    channel = str(_first_value(enquiry, "enquiry_channel_at_t0", "source") or "").strip()
-    if channel in {"Direct_Sales", "Referral", "Phone", "CRM"}:
-        return 10, f"Kenh tiep nhan uu tien: {channel} (+10d)"
-    if channel in {"Email", "Zalo", "Website", "Web_Form"}:
-        return 8, f"Kenh tiep nhan tieu chuan: {channel} (+8d)"
-    if channel:
-        return 6, f"Kenh tiep nhan: {channel} (+6d)"
-    return 5, "Kenh tiep nhan mac dinh (+5d)"
+def _score_sla_urgency(enquiry: dict[str, Any], now_dt: datetime) -> tuple[int, str]:
+    due_date = _parse_date(
+        _first_value(enquiry, "contract_due_date", "sla_due_date", "commitment_due_date")
+    )
+    if due_date is None:
+        return 5, "Han hop dong: > 7 ngay / chua co han (+5d)"
+    days_left = (due_date - now_dt.date()).days
+    if days_left <= 1:
+        return 25, f"Han hop dong rat gap ({days_left} ngay) (+25d)"
+    if days_left <= 3:
+        return 20, f"Han hop dong gap ({days_left} ngay) (+20d)"
+    if days_left <= 7:
+        return 12, f"Han hop dong sap toi ({days_left} ngay) (+12d)"
+    return 5, f"Han hop dong: > 7 ngay ({days_left} ngay) (+5d)"
 
 
 def is_tier0_urgent(enquiry: dict[str, Any], now: datetime | None = None) -> tuple[bool, list[str]]:
     """
     Kiểm tra điều kiện ưu tiên khẩn cấp Tier 0:
-    - Bản ghi có workflow_state == 'Closed' không được nâng lên Tier 0.
+    - Bản ghi có workflow_state == 'Closed' hoặc 'withdrawn' không được nâng lên Tier 0.
     - is_urgent_replacement == 'Urgent' (hoặc tương đương), HOẶC
-    - contract_due_date nằm trong vòng 0..7 ngày tính từ t0_time (hoặc now).
+    - contract_due_date còn <= 7 ngày tính từ now (bao gồm cả trường hợp quá hạn days_left < 0).
     """
     state = str(enquiry.get("workflow_state") or "").strip()
-    if state.lower() == "closed":
+    if state.lower() in {"closed", "withdrawn"}:
         return False, []
 
     urgent_reasons: list[str] = []
@@ -148,17 +129,18 @@ def is_tier0_urgent(enquiry: dict[str, Any], now: datetime | None = None) -> tup
     due_date = _parse_date(
         _first_value(enquiry, "contract_due_date", "sla_due_date", "commitment_due_date")
     )
-    ref_dt = _parse_datetime(_first_value(enquiry, "t0_time", "feature_event_time")) or now
-    if due_date is not None and ref_dt is not None:
-        days_left = (due_date - ref_dt.date()).days
-        if 0 <= days_left <= 7:
+    ref_dt = now or datetime.now(VN_TZ)
+    ref_date = ref_dt.date() if isinstance(ref_dt, datetime) else ref_dt
+    if due_date is not None and ref_date is not None:
+        days_left = (due_date - ref_date).days
+        if days_left <= 7:
             urgent_reasons.append(f"Han hop dong gap ({days_left} ngay)")
 
     return (len(urgent_reasons) > 0), urgent_reasons
 
 
 def calculate_rules_score(enquiry: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
-    """Tính điểm RulesScore tất định (0..100) và danh sách tối đa 3 lý do chính."""
+    """Tính điểm RulesScore tất định (0..100) theo 4 tiêu chí us_02 và danh sách tối đa 3 lý do chính."""
     now_dt = now or datetime.now(VN_TZ)
     if isinstance(now_dt, date) and not isinstance(now_dt, datetime):
         now_dt = datetime.combine(now_dt, datetime.min.time(), tzinfo=VN_TZ)
@@ -176,16 +158,14 @@ def calculate_rules_score(enquiry: dict[str, Any], now: datetime | None = None) 
     spec_pts, spec_reason = _score_spec_completeness(
         _first_value(enquiry, "spec_completeness", "request_completeness_at_t0", "request_completeness")
     )
-    val_pts, val_reason = _score_value_band(enquiry)
-    rel_pts, rel_reason = _score_account_relationship(enquiry)
-    chan_pts, chan_reason = _score_channel_source(enquiry)
+    age_pts, age_reason = _score_enquiry_age(enquiry, now_dt)
+    sla_pts, sla_reason = _score_sla_urgency(enquiry, now_dt)
 
     contributions = {
         "product_fit": {"points": prod_pts, "reason": prod_reason},
         "spec_completeness": {"points": spec_pts, "reason": spec_reason},
-        "value_band": {"points": val_pts, "reason": val_reason},
-        "account_relationship": {"points": rel_pts, "reason": rel_reason},
-        "channel_source": {"points": chan_pts, "reason": chan_reason},
+        "enquiry_age": {"points": age_pts, "reason": age_reason},
+        "sla_urgency": {"points": sla_pts, "reason": sla_reason},
     }
 
     total_score = min(100, sum(item["points"] for item in contributions.values()))
@@ -241,7 +221,7 @@ def rank_queue(
 ) -> list[dict[str, Any]]:
     """
     Xếp hạng danh sách enquiries theo thứ tự ưu tiên:
-    1. Lọc bỏ các bản ghi đã đóng (workflow_state == 'Closed') khi exclude_closed=True.
+    1. Lọc bỏ các bản ghi đã đóng/rút (workflow_state == 'Closed' hoặc 'withdrawn') khi exclude_closed=True.
     2. Ưu tiên Tier 0 (is_tier0_urgent = True) lên đầu.
     3. Điểm rules_score giảm dần.
     4. FIFO theo t0_time tăng dần (đến trước phục vụ trước).
@@ -252,7 +232,7 @@ def rank_queue(
         for row in enquiries
         if not (
             exclude_closed
-            and str(row.get("workflow_state") or "").strip().lower() == "closed"
+            and str(row.get("workflow_state") or "").strip().lower() in {"closed", "withdrawn"}
         )
     ]
 

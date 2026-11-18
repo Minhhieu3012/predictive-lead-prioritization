@@ -1,5 +1,6 @@
 """PLPT-16 & PLPT-17: FastAPI Queue Endpoint + Emergency Block & Stale Data Hold Controls."""
 
+import csv
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
@@ -63,7 +64,7 @@ def _ensure_blocked_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def load_enquiries_and_meta() -> tuple[list[dict[str, Any]], set[str], set[str], float]:
+def load_enquiries_and_meta() -> tuple[list[dict[str, Any]], set[str], set[str], float | None]:
     """
     Đọc bảng clean_enquiries (hoặc fallback sang raw_enquiries),
     loại bỏ các bản ghi đã đóng (workflow_state = 'Closed'),
@@ -86,11 +87,11 @@ def load_enquiries_and_meta() -> tuple[list[dict[str, Any]], set[str], set[str],
 
         table_name = "clean_enquiries" if has_clean else ("raw_enquiries" if has_raw else None)
         if table_name is None:
-            return [], set(), set(), 0.0
+            return [], set(), set(), None
 
         cursor.execute(
             f"SELECT * FROM {table_name} "
-            f"WHERE COALESCE(LOWER(TRIM(workflow_state)), '') != 'closed'"
+            f"WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')"
         )
         enquiries = [dict(row) for row in cursor.fetchall()]
 
@@ -107,24 +108,27 @@ def load_enquiries_and_meta() -> tuple[list[dict[str, Any]], set[str], set[str],
                 acct_val = str(row_dict.get("account_key") or "").strip()
                 if enq_val:
                     blocked_enquiries.add(enq_val)
-                if acct_val:
+                elif acct_val:
                     blocked_accounts.add(acct_val)
 
-        # Tính source_age_hours dựa trên extraction_time mới nhất trong bảng
+        # Tính source_age_hours dựa trên extraction_time; nếu rỗng hoặc bất kỳ dòng non-Closed nào thiếu/sai định dạng -> None
+        has_unverified_extraction = False
         latest_ext = None
         for row in enquiries:
             ext_dt = _parse_datetime(row.get("extraction_time"))
-            if ext_dt is not None:
-                if ext_dt.tzinfo is None:
-                    ext_dt = ext_dt.replace(tzinfo=VN_TZ)
-                if latest_ext is None or ext_dt > latest_ext:
-                    latest_ext = ext_dt
+            if ext_dt is None:
+                has_unverified_extraction = True
+                break
+            if ext_dt.tzinfo is None:
+                ext_dt = ext_dt.replace(tzinfo=VN_TZ)
+            if latest_ext is None or ext_dt > latest_ext:
+                latest_ext = ext_dt
 
-        if latest_ext is not None:
+        if not enquiries or has_unverified_extraction or latest_ext is None:
+            age_hours: float | None = None
+        else:
             now_vn = datetime.now(VN_TZ)
             age_hours = max(0.0, round((now_vn - latest_ext).total_seconds() / 3600.0, 2))
-        else:
-            age_hours = 0.0
 
         return enquiries, blocked_enquiries, blocked_accounts, age_hours
 
@@ -153,6 +157,8 @@ def block_lead_or_account(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
         or payload.get("customer_id")
         or ""
     ).strip()
+    block_scope = str(payload.get("block_scope") or "").strip().lower()
+    block_account = bool(payload.get("block_account")) or block_scope == "account"
     reason = str(
         payload.get("reason")
         or payload.get("block_reason")
@@ -166,6 +172,19 @@ def block_lead_or_account(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
             detail="Cần cung cấp ít nhất một trong hai trường: enquiry_id hoặc account_key.",
         )
 
+    # Nếu gửi enquiry_id mà không chọn rõ chế độ chặn toàn tài khoản, chỉ chặn theo enquiry_id
+    if enquiry_id and not block_account:
+        target_enq: str | None = enquiry_id
+        target_acct: str | None = None
+    else:
+        if not account_key:
+            raise HTTPException(
+                status_code=400,
+                detail="Cần cung cấp account_key khi chọn chế độ chặn toàn tài khoản.",
+            )
+        target_enq = None
+        target_acct = account_key
+
     db_path = _get_db_path()
     if not db_path.exists():
         raise HTTPException(status_code=503, detail=f"Database not found: {db_path}")
@@ -175,16 +194,26 @@ def block_lead_or_account(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
     try:
         with sqlite3.connect(str(db_path)) as conn:
             _ensure_blocked_table(conn)
-            existing = conn.execute(
-                """
-                SELECT enquiry_id, account_key, reason, blocked_at
-                FROM blocked_accounts
-                WHERE (COALESCE(enquiry_id, '') != '' AND enquiry_id = ?)
-                   OR (COALESCE(account_key, '') != '' AND account_key = ?)
-                LIMIT 1
-                """,
-                (enquiry_id, account_key),
-            ).fetchone()
+            if target_enq is not None:
+                existing = conn.execute(
+                    """
+                    SELECT enquiry_id, account_key, reason, blocked_at
+                    FROM blocked_accounts
+                    WHERE enquiry_id = ?
+                    LIMIT 1
+                    """,
+                    (target_enq,),
+                ).fetchone()
+            else:
+                existing = conn.execute(
+                    """
+                    SELECT enquiry_id, account_key, reason, blocked_at
+                    FROM blocked_accounts
+                    WHERE COALESCE(enquiry_id, '') = '' AND account_key = ?
+                    LIMIT 1
+                    """,
+                    (target_acct,),
+                ).fetchone()
 
             if existing is None:
                 conn.execute(
@@ -192,13 +221,15 @@ def block_lead_or_account(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
                     INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    (enquiry_id or None, account_key or None, reason, now_iso, created_by),
+                    (target_enq, target_acct, reason, now_iso, created_by),
                 )
                 conn.commit()
                 blocked_at = now_iso
+                enquiry_id = target_enq or ""
+                account_key = target_acct or ""
             else:
-                enquiry_id = existing[0] or enquiry_id
-                account_key = existing[1] or account_key
+                enquiry_id = existing[0] or ""
+                account_key = existing[1] or ""
                 reason = existing[2] or reason
                 blocked_at = existing[3] or now_iso
 
@@ -214,9 +245,28 @@ def block_lead_or_account(payload: dict[str, Any] = Body(...)) -> dict[str, Any]
         raise HTTPException(status_code=500, detail=f"Database error: {error}")
 
 
+def _count_quarantine_rows() -> int:
+    project_root = Path(__file__).resolve().parents[2]
+    quarantine_dir = Path(os.getenv("QUARANTINE_DIR", str(project_root / "data" / "quarantine")))
+    unique_ids: set[str] = set()
+    no_id_rows = 0
+    for fname in ("quarantine_rows.csv", "quarantine_outcomes.csv"):
+        fpath = quarantine_dir / fname
+        if fpath.exists():
+            with fpath.open("r", encoding="utf-8", errors="replace", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    enq_id = str(row.get("enquiry_id") or "").strip()
+                    if enq_id:
+                        unique_ids.add(enq_id)
+                    elif any(str(v or "").strip() for v in row.values()):
+                        no_id_rows += 1
+    return len(unique_ids) + no_id_rows
+
+
 @app.get("/api/queue")
 def get_queue(
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=25, ge=1, le=1000),
 ) -> dict[str, Any]:
     """
     Trả về danh sách xếp hạng theo đúng định dạng khóa cứng mục 6 (PLPT-16)
@@ -240,14 +290,20 @@ def get_queue(
                 continue
             active_queue.append(entry)
 
-        is_stale = source_age_hours > STALE_HOLD_HOURS
-        status = "HELD_STALE_DATA" if is_stale else "OK"
-        warning = (
-            f"Dữ liệu nguồn đã cũ {source_age_hours} giờ (vượt ngưỡng 24 giờ). "
-            "Hàng đợi tạm khóa (HELD_STALE_DATA) để đảm bảo an toàn vận hành."
-            if is_stale
-            else None
-        )
+        is_stale = source_age_hours is None or source_age_hours > STALE_HOLD_HOURS
+        status = "HOLD_STALE_DATA" if is_stale else "OK"
+        if source_age_hours is None:
+            warning = (
+                "Không xác minh được độ tươi dữ liệu nguồn (tập dữ liệu rỗng hoặc thiếu/sai định dạng extraction_time). "
+                "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
+            )
+        elif is_stale:
+            warning = (
+                f"Dữ liệu nguồn đã cũ {source_age_hours} giờ (vượt ngưỡng 24 giờ). "
+                "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
+            )
+        else:
+            warning = None
 
         items: list[dict[str, Any]] = []
         if not is_stale:
@@ -271,6 +327,7 @@ def get_queue(
             "locked": is_stale,
             "warning": warning,
             "source_age_hours": source_age_hours,
+            "quarantine_count": _count_quarantine_rows(),
             "total": len(active_queue) if not is_stale else 0,
             "items": items,
             "data": items,

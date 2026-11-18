@@ -33,7 +33,8 @@
 
 ## 4. Quy trình ứng phó sự cố 4 giờ (SEC 08)
 Khi phát hiện nghi ngờ rò rỉ dữ liệu cá nhân, truy cập trái phép hoặc sai lệch kiểm soát điểm/chặn khẩn cấp:
-1. **Giờ 0 – 1 (Khoanh vùng):** Ngắt ngay cổng API/xuất dữ liệu bị ảnh hưởng (`HELD_STALE_DATA`) để chặn phát tán.
+1. **Giờ 0 – 1 (Khoanh vùng):** Ngắt ngay cổng API/xuất dữ liệu bị ảnh hưởng (`HOLD_STALE_DATA`) để chặn phát tán.
 2. **Giờ 1 – 2 (Lưu dấu vết):** Lưu giữ toàn bộ nhật ký hệ thống (`audit_log`), bản ghi bị ảnh hưởng và chặn khẩn cấp tài khoản liên quan.
 3. **Giờ 2 – 4 (Báo cáo bắt buộc):** Gửi thông báo chính thức cho **Người phụ trách phía SongNhat (Purchaser)** **trong vòng tối đa 4 giờ** kể từ lúc phát hiện.
 4. **Sau 4 giờ (Khắc phục):** Vá lỗi, kiểm thử lại toàn bộ chốt an toàn trước khi mở lại hệ thống.
+

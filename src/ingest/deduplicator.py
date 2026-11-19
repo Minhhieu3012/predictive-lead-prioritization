@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 
 VN_TZ = timezone(timedelta(hours=7))
+WINDOW_DAYS = 60
+INACTIVE_STATES = {"closed", "withdrawn"}
 
 
 def _default_db_path() -> str:
@@ -43,12 +45,26 @@ def _parse_iso(ts: Any) -> datetime:
         return datetime.max.replace(tzinfo=VN_TZ)
 
 
+def _parse_iso_min(ts: Any) -> datetime:
+    if _is_empty(ts):
+        return datetime.min.replace(tzinfo=VN_TZ)
+    try:
+        dt = datetime.fromisoformat(str(ts).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=VN_TZ)
+        return dt
+    except ValueError:
+        return datetime.min.replace(tzinfo=VN_TZ)
+
+
 def deduplicate_dataframe(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Hợp nhất định danh đa kênh trên DataFrame theo (account_key, product_family, project_ref_code):
-    - Giữ bản ghi có t0_time sớm nhất làm bản ghi gốc (canonical).
-    - Bù đắp các trường bị khuyết từ các bản ghi trùng sang bản ghi gốc.
-    - Trả về (clean_df, merge_logs_df).
+    - Không gộp hồ sơ đang mở vào hồ sơ Closed/withdrawn (giữ nguyên Closed/withdrawn độc lập).
+    - Chỉ gộp các hồ sơ đang mở trong cùng cửa sổ quan sát 60 ngày kể từ t0_time của bản ghi gốc
+      (hoặc cùng project_ref_code khác rỗng).
+    - Giữ bản ghi có t0_time sớm nhất làm canonical, cập nhật extraction_time = max(...)
+      và workflow_state theo bản ghi mới nhất theo extraction_time.
     """
     audit_columns = [
         "canonical_enquiry_id",
@@ -74,7 +90,16 @@ def deduplicate_dataframe(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     columns = list(df.columns)
 
     records = df.to_dict(orient="records")
-    records.sort(
+    inactive_records: list[dict[str, Any]] = []
+    active_records: list[dict[str, Any]] = []
+    for row in records:
+        state = str(row.get("workflow_state") or "").strip().lower()
+        if state in INACTIVE_STATES:
+            inactive_records.append(dict(row))
+        else:
+            active_records.append(row)
+
+    active_records.sort(
         key=lambda r: (
             _parse_iso(r.get("t0_time")),
             str(r.get("enquiry_id") or ""),
@@ -82,7 +107,7 @@ def deduplicate_dataframe(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     )
 
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for row in records:
+    for row in active_records:
         acct = str(row.get("account_key") or "").strip()
         prod = str(row.get("product_family") or "").strip()
         proj = ""
@@ -90,16 +115,55 @@ def deduplicate_dataframe(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
             proj = str(row.get("project_ref_code")).strip()
         groups.setdefault((acct, prod, proj), []).append(row)
 
-    clean_records: list[dict[str, Any]] = []
+    # Tách cụm theo cửa sổ quan sát 60 ngày khi không có project_ref_code khớp
+    clusters: list[tuple[tuple[str, str, str], list[dict[str, Any]]]] = []
+    for key, items in groups.items():
+        acct, prod, proj = key
+        if proj:
+            clusters.append((key, items))
+            continue
+        current_cluster: list[dict[str, Any]] = []
+        cluster_start_t0: datetime | None = None
+        for row in items:
+            row_t0 = _parse_iso(row.get("t0_time"))
+            if not current_cluster:
+                current_cluster = [row]
+                cluster_start_t0 = row_t0
+            else:
+                if (
+                    cluster_start_t0 is not None
+                    and cluster_start_t0 != datetime.max.replace(tzinfo=VN_TZ)
+                    and row_t0 != datetime.max.replace(tzinfo=VN_TZ)
+                    and (row_t0 - cluster_start_t0).total_seconds() > WINDOW_DAYS * 86400
+                ):
+                    clusters.append((key, current_cluster))
+                    current_cluster = [row]
+                    cluster_start_t0 = row_t0
+                else:
+                    current_cluster.append(row)
+        if current_cluster:
+            clusters.append((key, current_cluster))
+
+    clean_records: list[dict[str, Any]] = list(inactive_records)
     audit_rows: list[dict[str, Any]] = []
     now_iso = datetime.now(VN_TZ).isoformat(timespec="seconds")
 
-    for (acct, prod, proj), items in groups.items():
+    for (acct, prod, proj), items in clusters:
         canonical = dict(items[0])
+
+        # Tìm extraction_time lớn nhất và workflow_state mới nhất theo extraction_time
+        latest_item = max(
+            items,
+            key=lambda r: (_parse_iso_min(r.get("extraction_time")), str(r.get("enquiry_id") or "")),
+        )
+        if not _is_empty(latest_item.get("extraction_time")):
+            canonical["extraction_time"] = latest_item.get("extraction_time")
+        if not _is_empty(latest_item.get("workflow_state")):
+            canonical["workflow_state"] = latest_item.get("workflow_state")
 
         for dup in items[1:]:
             for col in columns:
-                if col in {"enquiry_id", "t0_time"}:
+                if col in {"enquiry_id", "t0_time", "extraction_time", "workflow_state"}:
                     continue
                 if _is_empty(canonical.get(col)) and not _is_empty(dup.get(col)):
                     canonical[col] = dup[col]
@@ -148,9 +212,41 @@ def deduplicate_dataframe(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
 
 def init_dedup_tables(conn: sqlite3.Connection) -> None:
     """
-    Khởi tạo bảng merge_audit_log làm bảng lưu vết chuẩn duy nhất,
-    và tạo VIEW merge_logs trỏ về merge_audit_log để tương thích test cũ mà không nhân đôi dữ liệu.
+    Khởi tạo bảng clean_enquiries (giữ nguyên PK & schema),
+    bảng merge_audit_log và VIEW merge_logs.
     """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clean_enquiries (
+            enquiry_id TEXT PRIMARY KEY,
+            account_key TEXT NOT NULL,
+            cohort TEXT,
+            source TEXT,
+            t0_time TEXT NOT NULL,
+            extraction_time TEXT NOT NULL,
+            product_family TEXT NOT NULL,
+            project_ref_code TEXT,
+            spec_completeness TEXT,
+            is_urgent_replacement TEXT,
+            contract_due_date TEXT,
+            workflow_state TEXT,
+            industry_at_t0 TEXT,
+            enquiry_channel_at_t0 TEXT,
+            region_at_t0 TEXT,
+            account_age_days_at_t0 INTEGER,
+            prior_purchase_count_at_t0 INTEGER,
+            estimated_value_band_at_t0 TEXT,
+            feature_event_time TEXT,
+            feature_available_at TEXT
+        )
+        """
+    )
+    existing_clean_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
+    }
+    if "project_ref_code" not in existing_clean_cols:
+        conn.execute("ALTER TABLE clean_enquiries ADD COLUMN project_ref_code TEXT")
+
     existing = conn.execute(
         "SELECT type FROM sqlite_master WHERE name='merge_logs'"
     ).fetchone()
@@ -187,7 +283,7 @@ def init_dedup_tables(conn: sqlite3.Connection) -> None:
 def deduplicate_enquiries(db_path: str | Path | None = None) -> dict[str, Any]:
     """
     Đọc raw_enquiries từ SQLite, chạy deduplicate_dataframe,
-    ghi bảng clean_enquiries và merge_audit_log (kèm view merge_logs).
+    cập nhật clean_enquiries và merge_audit_log trong một transaction BEGIN IMMEDIATE.
     """
     target_db = str(db_path or _default_db_path())
 
@@ -196,7 +292,19 @@ def deduplicate_enquiries(db_path: str | Path | None = None) -> dict[str, Any]:
         raw_df = pd.read_sql_query("SELECT * FROM raw_enquiries", conn)
         clean_df, merge_logs_df = deduplicate_dataframe(raw_df)
 
-        clean_df.to_sql("clean_enquiries", conn, if_exists="replace", index=False)
+        # Chỉ chèn các cột có trong bảng clean_enquiries để giữ nguyên schema & PK
+        table_cols = [
+            row[1] for row in conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
+        ]
+        for col in table_cols:
+            if col not in clean_df.columns:
+                clean_df[col] = None
+        clean_insert_df = clean_df[table_cols]
+
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM clean_enquiries")
+        if not clean_insert_df.empty:
+            clean_insert_df.to_sql("clean_enquiries", conn, if_exists="append", index=False)
 
         conn.execute("DELETE FROM merge_audit_log")
         if not merge_logs_df.empty:

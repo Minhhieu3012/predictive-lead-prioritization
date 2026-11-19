@@ -13,7 +13,7 @@ INDUSTRIES = ["Manufacturing", "Food Processing", "Construction", "Logistics", "
 REGIONS = ["North", "Central", "South"]
 VALUE_BANDS = ["Under_50M", "50M_200M", "200M_500M", "Over_500M"]
 WORKFLOW_STATES = ["New", "Contacted", "Under_Review", "Quoted", "Closed"]
-SPEC_LEVELS = ["Yes", "No"]
+SPEC_LEVELS = ["Full", "Partial", "Minimal"]
 
 
 def to_vn_iso(dt: datetime) -> str:

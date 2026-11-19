@@ -19,7 +19,7 @@ def _create_test_db(db_path: Path, extraction_time: str) -> None:
                 enquiry_id TEXT PRIMARY KEY,
                 account_key TEXT NOT NULL,
                 t0_time TEXT NOT NULL,
-                extraction_time TEXT NOT NULL,
+                extraction_time TEXT,
                 product_family TEXT NOT NULL,
                 spec_completeness TEXT,
                 is_urgent_replacement TEXT,
@@ -136,9 +136,10 @@ def test_stale_data_locks_queue_after_24_hours(tmp_path, monkeypatch):
     res = client.get("/api/queue?limit=10")
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "HELD_STALE_DATA"
+    assert data["status"] == "HOLD_STALE_DATA"
     assert data["locked"] is True
     assert data["source_age_hours"] > 24.0
+    assert data["total"] == 0
     assert data["items"] == []
     assert data["data"] == []
 
@@ -158,3 +159,46 @@ def test_fresh_data_preserves_total_and_backward_compatible_keys(tmp_path, monke
     assert data["total"] == 3
     assert len(data["items"]) == 1
     assert data["items"] == data["data"]
+
+
+def test_empty_non_closed_queue_holds_stale_data(tmp_path, monkeypatch):
+    db_path = tmp_path / "test_empty.db"
+    fresh_ext = (datetime.now(VN_TZ) - timedelta(hours=1)).replace(microsecond=0).isoformat()
+    _create_test_db(db_path, fresh_ext)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE clean_enquiries SET workflow_state = 'Closed'")
+        conn.commit()
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    client = TestClient(app)
+    res = client.get("/api/queue?limit=10")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "HOLD_STALE_DATA"
+    assert data["locked"] is True
+    assert data["source_age_hours"] is None
+    assert data["total"] == 0
+    assert data["items"] == []
+    assert data["data"] == []
+
+
+def test_missing_or_invalid_extraction_time_holds_stale_data(tmp_path, monkeypatch):
+    db_path = tmp_path / "test_invalid_ext.db"
+    fresh_ext = (datetime.now(VN_TZ) - timedelta(hours=1)).replace(microsecond=0).isoformat()
+    _create_test_db(db_path, fresh_ext)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("UPDATE clean_enquiries SET extraction_time = NULL WHERE enquiry_id = 'SN-0001'")
+        conn.execute("UPDATE clean_enquiries SET extraction_time = 'invalid-date' WHERE enquiry_id = 'SN-0002'")
+        conn.commit()
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    client = TestClient(app)
+    res = client.get("/api/queue?limit=10")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "HOLD_STALE_DATA"
+    assert data["locked"] is True
+    assert data["source_age_hours"] is None
+    assert data["total"] == 0
+    assert data["items"] == []
+    assert data["data"] == []

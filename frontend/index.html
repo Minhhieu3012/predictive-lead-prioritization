@@ -206,6 +206,10 @@
   <script>
     const API_BASE = "http://127.0.0.1:8000";
     const API_LIMIT = 1000;
+    const MESSAGE_STORAGE_KEY = "last_block_msg";
+    const STALE_STATUSES = ["HELD_STALE_DATA", "HOLD_STALE_DATA"];
+    const DEFAULT_STALE_WARNING =
+      "Dữ liệu nguồn quá hạn 24 giờ hoặc chưa xác minh được độ tươi. Active Queue tạm khóa để đảm bảo an toàn vận hành.";
     const VIEW_TITLES = {
       Active: "Active Queue",
       Unscored: "Unscored Records",
@@ -243,6 +247,10 @@
       return element;
     }
 
+    function isStale(payload) {
+      return !!payload && (payload.locked === true || STALE_STATUSES.includes(payload.status));
+    }
+
     function formatSnapshotAge(seconds) {
       if (seconds === null || seconds === undefined) return "—";
       const hours = Number(seconds) / 3600;
@@ -267,18 +275,70 @@
       }).format(date);
     }
 
+    /* ---------- Thông báo thao tác (có lưu qua sessionStorage) ---------- */
+
+    function safeStorage(action) {
+      try { return action(); } catch (_) { return null; }
+    }
+
+    function clearMessage() {
+      const message = $("action-message");
+      message.className = "message";
+      message.textContent = "";
+      if (actionMessageTimer) {
+        clearTimeout(actionMessageTimer);
+        actionMessageTimer = null;
+      }
+      safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+    }
+
     function showMessage(type, text, durationMs = 0) {
       const message = $("action-message");
       message.className = `message show ${type}`;
       message.textContent = text;
-      if (actionMessageTimer) clearTimeout(actionMessageTimer);
+      if (actionMessageTimer) {
+        clearTimeout(actionMessageTimer);
+        actionMessageTimer = null;
+      }
       if (durationMs > 0) {
-        actionMessageTimer = setTimeout(() => {
-          message.className = "message";
-          message.textContent = "";
-        }, durationMs);
+        const expiresAt = Date.now() + durationMs;
+        safeStorage(() => sessionStorage.setItem(
+          MESSAGE_STORAGE_KEY,
+          JSON.stringify({ type, text, expiresAt })
+        ));
+        actionMessageTimer = setTimeout(clearMessage, durationMs);
+      } else {
+        safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
       }
     }
+
+    function restorePersistedMessage() {
+      const saved = safeStorage(() => sessionStorage.getItem(MESSAGE_STORAGE_KEY));
+      if (!saved) return;
+      try {
+        const parsed = JSON.parse(saved);
+        const remaining = (parsed.expiresAt || 0) - Date.now();
+        if (remaining > 0 && parsed.text) {
+          const message = $("action-message");
+          message.className = `message show ${parsed.type || "ok"}`;
+          message.textContent = parsed.text;
+          if (actionMessageTimer) clearTimeout(actionMessageTimer);
+          actionMessageTimer = setTimeout(clearMessage, remaining);
+        } else {
+          safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+        }
+      } catch (_) {
+        safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+      }
+    }
+
+    function connectionHint(error) {
+      return error instanceof TypeError
+        ? ` Hãy chắc chắn API (Uvicorn) đang chạy tại ${API_BASE}.`
+        : "";
+    }
+
+    /* ---------- Render ---------- */
 
     function getSearchText(item) {
       const factors = (item.contributing_factors || [])
@@ -316,9 +376,10 @@
       return details;
     }
 
+    // Chỉ điền mã hồ sơ (không điền mã khách hàng) để tránh chặn nhầm cả khách hàng.
     function setBlockTarget(item) {
       $("enquiry-id").value = item.enquiry_id || "";
-      $("account-key").value = item.account_key || "";
+      $("account-key").value = "";
       document.querySelector(".block-panel").open = true;
       $("block-reason").focus();
     }
@@ -399,6 +460,17 @@
       list.replaceChildren();
       if (!currentPayload) return;
 
+      // Dữ liệu quá hạn: khóa Active Queue, không hiển thị hồ sơ nào.
+      if (activeView === "Active" && isStale(currentPayload)) {
+        const locked = makeElement("div", "empty-state");
+        locked.append(
+          makeElement("strong", "", "Active Queue đang bị khóa"),
+          makeElement("span", "", "Hãy làm mới dữ liệu nguồn rồi tải lại để tiếp tục.")
+        );
+        list.append(locked);
+        return;
+      }
+
       const query = normalizeSearch($("search-input").value);
       const items = (currentPayload.items || []).filter(item =>
         !query || getSearchText(item).includes(query)
@@ -421,6 +493,7 @@
     }
 
     function updateSummary(payload) {
+      const stale = isStale(payload);
       $("stat-total").textContent = String(payload.total ?? 0);
       $("stat-status").textContent = `${activeView} · ${payload.status || "—"}`;
       $("stat-scheduled").textContent = String(payload.scheduled_today ?? 0);
@@ -430,8 +503,7 @@
       const itemWithMode = (payload.items || []).find(item => item.score_mode);
       $("stat-score-mode").textContent = itemWithMode?.score_mode || "—";
       $("status-badge").textContent = payload.status || "—";
-      const badgeState = payload.status === "HELD_STALE_DATA" ||
-        payload.status === "QUARANTINE_SOURCE_UNAVAILABLE"
+      const badgeState = stale || payload.status === "QUARANTINE_SOURCE_UNAVAILABLE"
         ? "badge-hold"
         : payload.status === "CAPACITY_EXCEEDED"
           ? "badge-warn"
@@ -444,10 +516,8 @@
         activeView === "Active" && payload.status === "NO_DAILY_SNAPSHOT"
       );
       const banner = $("stale-banner");
-      banner.classList.toggle("show", payload.status === "HELD_STALE_DATA");
-      banner.textContent = payload.status === "HELD_STALE_DATA"
-        ? "Dữ liệu nguồn quá hạn 24 giờ. Active Queue tạm khóa để đảm bảo an toàn vận hành."
-        : "";
+      banner.classList.toggle("show", stale);
+      banner.textContent = stale ? (payload.warning || DEFAULT_STALE_WARNING) : "";
       const viewNote = $("view-note");
       if (activeView === "Unscored" && payload.classification_basis) {
         viewNote.textContent = `Phân loại hiện tại: ${payload.classification_basis}.`;
@@ -461,6 +531,20 @@
       }
     }
 
+    // Dùng hồ sơ đầu tiên làm ví dụ trong placeholder (khi ô còn trống).
+    function updateBlockPlaceholders(payload) {
+      const first = (payload.items || [])[0];
+      if (!first) return;
+      if (first.enquiry_id && !$("enquiry-id").value) {
+        $("enquiry-id").placeholder = `Ví dụ: ${first.enquiry_id}`;
+      }
+      if (first.account_key && !$("account-key").value) {
+        $("account-key").placeholder = `Ví dụ: ${first.account_key}`;
+      }
+    }
+
+    /* ---------- API ---------- */
+
     async function loadQueue() {
       $("status-badge").textContent = "Đang tải...";
       try {
@@ -470,13 +554,14 @@
         if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
         currentPayload = payload;
         updateSummary(payload);
+        updateBlockPlaceholders(payload);
         renderQueue();
       } catch (error) {
         currentPayload = null;
         $("queue-list").replaceChildren();
         $("status-badge").textContent = "Lỗi kết nối";
         $("status-badge").className = "badge badge-hold";
-        showMessage("err", `Không tải được Sales Workspace: ${error.message}`);
+        showMessage("err", `Không tải được Sales Workspace: ${error.message}.${connectionHint(error)}`);
       }
     }
 
@@ -492,7 +577,7 @@
         showMessage("ok", "Đã tạo snapshot queue hôm nay.", 2500);
         await loadQueue();
       } catch (error) {
-        showMessage("err", `Không tạo được snapshot: ${error.message}`);
+        showMessage("err", `Không tạo được snapshot: ${error.message}.${connectionHint(error)}`);
       } finally {
         button.disabled = false;
       }
@@ -504,7 +589,7 @@
       const account_key = $("account-key").value.trim();
       const reason = $("block-reason").value.trim();
       if (!enquiry_id && !account_key) {
-        showMessage("err", "Vui lòng nhập mã hồ sơ hoặc mã khách hàng.");
+        showMessage("err", "Vui lòng nhập mã hồ sơ (SN-...) hoặc mã khách hàng (ACCT-...).");
         return;
       }
       try {
@@ -515,14 +600,21 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
-        showMessage("ok", "Đã chặn; hồ sơ được loại khỏi Active Queue.", 2500);
+        const target = [result.enquiry_id, result.account_key].filter(Boolean).join(" / ");
+        showMessage(
+          "ok",
+          `Đã chặn thành công${target ? `: ${target}` : ""} — hồ sơ được loại khỏi Active Queue.`,
+          2500
+        );
         $("enquiry-id").value = "";
         $("account-key").value = "";
         await loadQueue();
       } catch (error) {
-        showMessage("err", `Chặn hồ sơ thất bại: ${error.message}`);
+        showMessage("err", `Chặn hồ sơ thất bại: ${error.message}.${connectionHint(error)}`);
       }
     }
+
+    /* ---------- Sự kiện ---------- */
 
     document.querySelectorAll(".tab").forEach(tab => {
       tab.addEventListener("click", () => {
@@ -547,6 +639,7 @@
     $("create-snapshot").addEventListener("click", createDailySnapshot);
     $("block-form").addEventListener("submit", submitBlock);
 
+    restorePersistedMessage();
     loadQueue();
   </script>
 </body>

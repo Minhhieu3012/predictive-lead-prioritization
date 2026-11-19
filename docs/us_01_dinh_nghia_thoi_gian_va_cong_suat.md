@@ -19,8 +19,9 @@
   * Mọi yêu cầu chưa đi qua đủ 60 ngày và chưa có sự kiện chốt đạt chuẩn đều giữ nguyên trạng thái **`Unknown` (Chưa trưởng thành)**.
 
 ## 3. Công suất xử lý hàng ngày `K` & Tỷ lệ khám phá ngẫu nhiên (10%)
-* **Quy mô đội ngũ phục vụ:** **20 nhân viên Sales** (giới hạn **5 phiên đăng nhập đồng thời**), phục vụ 1 phân khúc thiết bị công nghiệp của SongNhat (Động cơ điện, Biến tần, Hộp số truyền động).
-* **Công suất `K` tham chiếu:** Trung bình **25 hồ sơ/ngày làm việc** cho toàn đội (tương đương ~500 hồ sơ mới/tháng), đảm bảo thời gian phân loại giảm từ **6 phút/hồ sơ** xuống **3 phút/hồ sơ** (tiết kiệm 25 giờ/tháng).
+* **Quy mô đội ngũ phục vụ:** **20 nhân viên Sales** (giới hạn **5 phiên đăng nhập đồng thời**), phục vụ 1 phân khúc thiết bị công nghiệp của SongNhat (`Motor_DongCo` — Động cơ điện, `Drive_BienTan` — Biến tần, `Transmission_HopSo` — Hộp số truyền động).
+* **Công suất `K` tham chiếu (giả định minh họa):** Trung bình **25 hồ sơ/ngày làm việc** cho toàn đội (tương đương ~500 hồ sơ mới/tháng), tương ứng mức giảm thời gian phân loại từ **6 phút/hồ sơ** xuống **3 phút/hồ sơ** (tiết kiệm 25 giờ/tháng).
+  * *Lưu ý:* Đây chỉ là **tham số giả định minh họa phục vụ tính toán đấu thầu (illustrative bid basis)** theo RFP (Part 1, Part 2, Annex E trang 23), chưa phải thông số chốt cứng vận hành; giá trị `K` thực tế phải được thống nhất với **Sales Owner** sau khi đo đạc khối lượng CRM thật (USR 02, MOD 07).
 * **Cơ chế phân bổ hàng đợi (`K` slots/ngày):**
   1. **Nhóm ưu tiên bắt buộc (`TIER_0`):** Các yêu cầu thay thế thiết bị khẩn cấp (`is_urgent_replacement = True`) và hồ sơ sát hạn cam kết hợp đồng (`contract_due_date`) được đẩy thẳng lên đầu hàng đợi và **không bao giờ bị bốc ngẫu nhiên**.
   2. **Nhóm theo điểm quy tắc (90% suất còn lại):** Sắp xếp theo `rule_score` giảm dần, trùng điểm xếp theo thứ tự đến trước phục vụ trước (FIFO theo `t0_time`).

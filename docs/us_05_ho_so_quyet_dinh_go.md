@@ -8,7 +8,7 @@
 Tài liệu này tổng hợp toàn bộ kết quả giai đoạn Discovery (Sprint 1: `US-01` đến `US-04`) để trình các bên liên quan phê duyệt giai đoạn triển khai 12 tuần theo chiến lược **Rules-First** (xây dựng bộ quy tắc minh bạch trước, chỉ mở khóa mô hình dự đoán ML khi đạt đủ ngưỡng dữ liệu và hiệu quả kinh tế).
 
 * **Xác nhận nút thắt:** Năng lực duyệt đơn của đội ngũ 20 nhân viên Sales SongNhat là **nút thắt vận hành thực sự (Có)** — xử lý thủ công 500 yêu cầu/tháng tốn 50 giờ, dễ bỏ sót đơn thay thế khẩn cấp và đơn sắp hết hạn hợp đồng.
-* **Kiểm định dữ liệu (từ `US-03.py`):** **ĐẠT** ngưỡng Gate GO với **1.000 hồ sơ lịch sử trưởng thành** (`180 Positive`, `820 Negative`) và **200 hồ sơ kiểm thử độc lập** (`45 Positive`, `155 Negative`), không có rò rỉ dữ liệu sau `t0_time`.
+* **Kiểm định dữ liệu (từ `US-03.py`):** **ĐẠT** ngưỡng Gate GO với **1.000 hồ sơ lịch sử trưởng thành** (`150 POSITIVE`, `850 NEGATIVE`), **200 hồ sơ kiểm thử độc lập** (`50 POSITIVE`, `150 NEGATIVE`) và **50 hồ sơ mới (`Unknown` / `OPEN_24H`)**, không có rò rỉ dữ liệu sau `t0_time` *(lưu ý: toàn bộ 1.260 dòng CSV hiện tại gồm 1.250 hợp lệ và 10 dòng lỗi `ERR-0001`–`ERR-0010` là dữ liệu giả lập sinh từ `scripts/generate_songnhat_data.py` để kiểm thử pipeline Rules-First MVP; trước Gate G1 bắt buộc phải kiểm toán dữ liệu lịch sử thật của SongNhat đạt tối thiểu `>= 1.000` hồ sơ distinct chín đủ 60 ngày, có ít nhất `100 POSITIVE` và `100 NEGATIVE` đã xác minh)*.
 * **Kinh tế (từ Annex E RFP):** Lộ trình **Rules** hoàn vốn trong **~21,1 tháng**; phần tăng thêm của **Predictive (ML)** chỉ đáng đầu tư khi tạo ra tối thiểu **7,458 triệu VND/tháng** doanh thu đóng góp tăng thêm thực tế.
 * **Khuyến nghị chốt:** **Phương án (a) — Triển khai đầy đủ theo chiến lược Rules-First** (đưa Rules Baseline vào vận hành ngay ở Sprint 2–3, đồng thời chạy thử nghiệm song song nhánh ML và chỉ phát hành ML ở Gate G1 nếu vượt Rules tối thiểu **1.20x**).
 
@@ -25,7 +25,7 @@ Tài liệu này tổng hợp toàn bộ kết quả giai đoạn Discovery (Spr
 | Lượng yêu cầu mới hàng tháng | ~500 hồ sơ/tháng (~25 hồ sơ/ngày) | Gom trùng đa kênh, giữ nguyên đầu vào | Đủ lớn để gây ùn ứ nếu phân loại thủ công. |
 | Thời gian phân loại mỗi hồ sơ | 6 phút / hồ sơ | **3 phút / hồ sơ** (giảm 50%) | Tiết kiệm **25 giờ công/tháng** (~3,75 triệu VND). |
 | Xử lý ca khẩn cấp & quá hạn | Dễ bị lẫn với đơn thường | Đẩy thẳng lên `TIER_0` & báo quá hạn sau 2 ngày | Bảo vệ cam kết SLA hợp đồng. |
-| Dữ liệu lịch sử sẵn sàng (`US-03`) | **1.000 train** (`180+ / 820-`) & **200 test** (`45+ / 155-`) | Độ phủ nhãn đạt 100%, 0 rò rỉ `t0` | **Đủ chuẩn** cho cả Rules và đánh giá nhánh ML. |
+| Dữ liệu lịch sử sẵn sàng (`US-03`) | **1.000 train** (`150 POSITIVE / 850 NEGATIVE`) & **200 test** (`50 POSITIVE / 150 NEGATIVE`) | Độ phủ nhãn đạt 100%, 0 rò rỉ `t0` | **Đủ chuẩn** cho cả Rules và đánh giá nhánh ML. |
 
 **Kết luận:** Nút thắt vận hành đã được xác nhận rõ ràng. Áp dụng hệ thống xếp hạng Rules-First giúp giải phóng ngay **25 giờ/tháng** cho đội Sales ngay khi lên sóng.
 

@@ -7,7 +7,7 @@
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     body { margin: 0; padding: 24px; background: #f4f6f9; color: #1e293b; }
-    button, input { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     button { cursor: pointer; }
     .container { max-width: 1120px; margin: 0 auto; }
     .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -18,7 +18,9 @@
     .btn:hover { background: #f8fafc; }
     .btn-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
     .btn-primary:hover { background: #1d4ed8; }
-    .btn-danger { border-color: #fecaca; color: #b91c1c; }
+    .btn-warning { border-color: #d97706; background: #d97706; color: #fff; }
+    .btn-warning:hover { background: #b45309; }
+    .btn-danger { border-color: #fecaca; color: #b91c1c; background: #fff; }
     .btn-danger:hover { background: #fef2f2; }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
     .notice { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e40af; margin-bottom: 16px; font-size: 13px; line-height: 1.55; }
@@ -49,6 +51,9 @@
     .badge-ok { background: #dcfce7; color: #166534; }
     .badge-warn { background: #fef3c7; color: #92400e; }
     .badge-hold { background: #fee2e2; color: #991b1b; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .overload-banner { display: none; padding: 12px 14px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #b91c1c; margin-bottom: 16px; font-size: 13px; font-weight: 600; }
+    .overload-banner.show { display: block; }
     .tabs { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; margin-top: 18px; }
     .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #64748b; font-size: 13px; font-weight: 700; white-space: nowrap; }
     .tab[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
@@ -63,6 +68,7 @@
     .stale-banner.show { display: block; }
     .items { display: grid; gap: 10px; }
     .lead-card { padding: 14px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
+    .lead-card.overdue { border-left: 4px solid #dc2626; background: #fffcfc; }
     .lead-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; }
     .lead-main { min-width: 220px; flex: 1; }
     .lead-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
@@ -77,6 +83,7 @@
     .score-value { display: block; color: #1d4ed8; font-size: 21px; font-weight: 800; line-height: 1.1; }
     .score-unit { color: #64748b; font-size: 10px; }
     .work-order { padding: 5px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .card-buttons { display: flex; gap: 6px; margin-left: 10px; }
     .factors { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; margin-top: 13px; }
     .factors-label { padding-top: 6px; color: #475569; font-size: 11px; font-weight: 700; }
     .factor { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
@@ -86,18 +93,25 @@
     .factor-detail { padding: 0 9px 8px; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
     .empty-state { padding: 34px 16px; border: 1px dashed #cbd5e1; border-radius: 9px; color: #64748b; text-align: center; font-size: 13px; }
     .empty-state strong { display: block; margin-bottom: 5px; color: #334155; }
+    
+    /* Modal Styles for PLPT-42 */
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-backdrop.show { display: flex; }
+    .modal-card { background: #fff; border-radius: 12px; width: 100%; max-width: 480px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+    .modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+    .modal-body { font-size: 13px; color: #475569; margin-bottom: 16px; line-height: 1.5; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+    .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
+    .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #1e293b; cursor: pointer; }
+
     [hidden] { display: none !important; }
     @media (max-width: 760px) {
       body { padding: 14px; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .card { padding: 13px; }
       .lead-actions { justify-content: flex-start; }
-    }
-    @media (max-width: 440px) {
-      .stats { gap: 7px; }
-      .stat { min-height: 88px; padding: 11px; }
-      .stat-value { font-size: 19px; }
-      .tabs { gap: 14px; }
     }
   </style>
 </head>
@@ -109,7 +123,7 @@
         <p class="subtitle">Không gian ưu tiên và rà soát hồ sơ báo giá</p>
       </div>
       <div class="header-actions">
-        <details class="block-panel card">
+        <details class="block-panel card" style="margin:0; padding:10px;">
           <summary>Chặn khẩn cấp</summary>
           <form id="block-form" class="block-form">
             <div class="field">
@@ -134,6 +148,9 @@
 
     <div id="action-message" class="message" role="status" aria-live="polite"></div>
     <div id="stale-banner" class="stale-banner" role="alert"></div>
+    <div id="overload-banner" class="overload-banner" role="alert">
+      ⚠️ <strong>CẢNH BÁO QUÁ TẢI HÀNG ĐỢI (QUEUE OVERLOAD):</strong> Các mục Tier 0 bắt buộc hoặc quá hạn vượt quá sức chứa daily capacity K!
+    </div>
 
     <section class="notice" aria-label="Giải thích điểm">
       <span class="notice-icon" aria-hidden="true">i</span>
@@ -154,9 +171,9 @@
         <div id="stat-capacity" class="stat-note">Capacity K = —</div>
       </article>
       <article class="stat">
-        <span class="stat-label">Khám phá ngẫu nhiên</span>
-        <strong id="stat-exploration" class="stat-value">—</strong>
-        <div class="stat-note">Trong các suất duyệt tùy nghi</div>
+        <span class="stat-label">Quá hạn 2 ngày làm việc</span>
+        <strong id="stat-overdue-2bd" class="stat-value" style="color:#dc2626;">—</strong>
+        <div class="stat-note">Cần Supervisor rà soát (USR 03)</div>
       </article>
       <article class="stat">
         <span class="stat-label">Tuổi snapshot nguồn</span>
@@ -203,6 +220,55 @@
     </section>
   </main>
 
+  <!-- MODAL XÁC THỰC QUYỀN LIÊN HỆ (PLPT-42 / USR 07) -->
+  <div id="modal-review" class="modal-backdrop">
+    <div class="modal-card">
+      <h3 class="modal-title">Xác thực quyền liên hệ khách hàng</h3>
+      <div class="modal-body">
+        <p>Hồ sơ: <strong id="review-target-id"></strong></p>
+        <p>Bạn phải xác nhận đã kiểm tra quyền liên hệ hợp pháp trên hệ thống SongNhat trước khi tiến hành outreach.</p>
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-permission" />
+            Xác nhận <code>contact_permission_verified = TRUE</code>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="btn-cancel-review">Hủy</button>
+        <button type="button" class="btn btn-primary" id="btn-submit-review">Xác nhận Review</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL GHI ĐÈ THỨ TỰ (PLPT-42 / USR 04 / MOD 07) -->
+  <div id="modal-override" class="modal-backdrop">
+    <div class="modal-card">
+      <h3 class="modal-title">Ghi đè thứ tự hàng đợi (Queue Override)</h3>
+      <div class="modal-body">
+        <p>Hồ sơ: <strong id="override-target-id"></strong></p>
+        <div class="form-group">
+          <label for="select-reason-code">Mã lý do ghi đè (Bắt buộc):</label>
+          <select id="select-reason-code">
+            <option value="CUSTOMER_URGENT_CALLBACK">CUSTOMER_URGENT_CALLBACK</option>
+            <option value="EXISTING_PROJECT_DEPENDENCY">EXISTING_PROJECT_DEPENDENCY</option>
+            <option value="TECHNICAL_SPEC_CLARIFICATION">TECHNICAL_SPEC_CLARIFICATION</option>
+            <option value="OTHER_VERIFIED">OTHER_VERIFIED</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="txt-justification">Lý do giải trình chi tiết (Bắt buộc):</label>
+          <textarea id="txt-justification" rows="3" placeholder="Nhập lý do nghiệp vụ cụ thể..."></textarea>
+          <span id="override-error" class="text-danger" style="color:#dc2626; font-size:11px; display:none;">Vui lòng nhập đầy đủ lý do giải trình!</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="btn-cancel-override">Hủy</button>
+        <button type="button" class="btn btn-warning" id="btn-submit-override">Xác nhận Ghi đè</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = "http://127.0.0.1:8000";
     const API_LIMIT = 1000;
@@ -225,7 +291,9 @@
 
     let activeView = "Active";
     let currentPayload = null;
+    let queueRequestId = 0;
     let actionMessageTimer = null;
+    let activeEnquiryForAction = null;
 
     const $ = id => document.getElementById(id);
 
@@ -384,14 +452,39 @@
       $("block-reason").focus();
     }
 
+    // PLPT-42: Mở modal xác thực review
+    function openReviewModal(item) {
+      activeEnquiryForAction = item.enquiry_id;
+      $("review-target-id").textContent = item.enquiry_id;
+      $("chk-permission").checked = false;
+      $("modal-review").classList.add("show");
+    }
+
+    // PLPT-42: Mở modal ghi đè thứ tự
+    function openOverrideModal(item) {
+      activeEnquiryForAction = item.enquiry_id;
+      $("override-target-id").textContent = item.enquiry_id;
+      $("select-reason-code").value = "CUSTOMER_URGENT_CALLBACK";
+      $("txt-justification").value = "";
+      $("override-error").style.display = "none";
+      $("modal-override").classList.add("show");
+    }
+
     function renderItem(item) {
       const article = makeElement("article", "lead-card");
+      if (item.is_overdue_2bd) {
+        article.classList.add("overdue");
+      }
+
       const top = makeElement("div", "lead-top");
       const main = makeElement("div", "lead-main");
       const title = makeElement("h3", "lead-title");
       title.append(makeElement("span", "", item.enquiry_id || "Không có mã hồ sơ"));
       if (item.allocation_type === "MANDATORY") {
         title.append(makeElement("span", "tier0", "Tier 0 · Bắt buộc"));
+      }
+      if (item.is_overdue_2bd) {
+        title.append(makeElement("span", "badge badge-danger", "⚠️ Quá hạn 2 ngày làm việc (Overdue)"));
       }
 
       const meta = makeElement("div", "lead-meta");
@@ -425,13 +518,27 @@
       if (item.final_work_order != null) {
         actions.append(makeElement("span", "work-order", `Work order ${item.final_work_order}`));
       }
+
+      // Nút tương tác PLPT-42 (Review & Override)
       if (activeView === "Active") {
+        const btnGroup = makeElement("div", "card-buttons");
+        
+        const reviewBtn = makeElement("button", "btn btn-primary btn-sm", "Review");
+        reviewBtn.type = "button";
+        reviewBtn.addEventListener("click", () => openReviewModal(item));
+
+        const overrideBtn = makeElement("button", "btn btn-warning btn-sm", "Ghi đè");
+        overrideBtn.type = "button";
+        overrideBtn.addEventListener("click", () => openOverrideModal(item));
+
         const blockButton = makeElement("button", "btn btn-danger btn-sm", "Chặn");
         blockButton.type = "button";
-        blockButton.setAttribute("aria-label", `Chặn khẩn cấp ${item.enquiry_id}`);
         blockButton.addEventListener("click", () => setBlockTarget(item));
-        actions.append(blockButton);
+
+        btnGroup.append(reviewBtn, overrideBtn, blockButton);
+        actions.append(btnGroup);
       }
+
       top.append(main, actions);
       article.append(top);
 
@@ -498,8 +605,9 @@
       $("stat-status").textContent = `${activeView} · ${payload.status || "—"}`;
       $("stat-scheduled").textContent = String(payload.scheduled_today ?? 0);
       $("stat-capacity").textContent = `Capacity K = ${payload.capacity_k ?? "—"}`;
-      $("stat-exploration").textContent = String(payload.exploration_slots ?? 0);
+      $("stat-overdue-2bd").textContent = String(payload.overdue_2bd_count ?? 0);
       $("stat-snapshot-age").textContent = formatSnapshotAge(payload.snapshot_age);
+      
       const itemWithMode = (payload.items || []).find(item => item.score_mode);
       $("stat-score-mode").textContent = itemWithMode?.score_mode || "—";
       $("status-badge").textContent = payload.status || "—";
@@ -515,6 +623,15 @@
       $("create-snapshot").hidden = !(
         activeView === "Active" && payload.status === "NO_DAILY_SNAPSHOT"
       );
+
+      // Cảnh báo quá tải (Queue Overload Banner)
+      const overloadBanner = $("overload-banner");
+      if (payload.is_overloaded) {
+        overloadBanner.classList.add("show");
+      } else {
+        overloadBanner.classList.remove("show");
+      }
+
       const banner = $("stale-banner");
       banner.classList.toggle("show", stale);
       banner.textContent = stale ? (payload.warning || DEFAULT_STALE_WARNING) : "";
@@ -546,17 +663,20 @@
     /* ---------- API ---------- */
 
     async function loadQueue() {
+      const requestId = ++queueRequestId;
       $("status-badge").textContent = "Đang tải...";
       try {
         const url = `${API_BASE}/api/v1/workspace/queue?view=${encodeURIComponent(activeView)}&limit=${API_LIMIT}`;
         const response = await fetch(url);
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        if (requestId !== queueRequestId) return;
         currentPayload = payload;
         updateSummary(payload);
         updateBlockPlaceholders(payload);
         renderQueue();
       } catch (error) {
+        if (requestId !== queueRequestId) return;
         currentPayload = null;
         $("queue-list").replaceChildren();
         $("status-badge").textContent = "Lỗi kết nối";
@@ -574,6 +694,11 @@
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        if (isStale(payload)) {
+          await loadQueue();
+          showMessage("err", payload.warning || DEFAULT_STALE_WARNING);
+          return;
+        }
         showMessage("ok", "Đã tạo snapshot queue hôm nay.", 2500);
         await loadQueue();
       } catch (error) {
@@ -614,6 +739,80 @@
       }
     }
 
+    // Xử lý API Review (PLPT-42 / USR 07)
+    async function handleConfirmReview() {
+      const verified = $("chk-permission").checked;
+      if (!verified) {
+        alert("Bạn phải xác nhận quyền liên hệ (contact_permission_verified = TRUE) trước khi thực hiện review!");
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/workspace/review`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enquiry_id: activeEnquiryForAction,
+            decision_type: "ACCEPT_PRIORITY",
+            contact_permission_verified: true,
+            contact_attempted: true,
+            review_completed: true,
+            next_step_note: "Xác nhận review và outreach qua UI Workspace"
+          })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        $("modal-review").classList.remove("show");
+        showMessage("ok", `Đã ghi nhận review thành công cho ${activeEnquiryForAction}`, 2500);
+        await loadQueue();
+      } catch (error) {
+        alert("Lỗi review: " + error.message);
+      }
+    }
+
+    // Xử lý API Override (PLPT-42 / USR 04)
+    async function handleConfirmOverride() {
+      const reasonCode = $("select-reason-code").value;
+      const justification = $("txt-justification").value.trim();
+      const errorSpan = $("override-error");
+
+      if (!justification) {
+        errorSpan.style.display = "block";
+        return;
+      }
+      errorSpan.style.display = "none";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/workspace/override`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enquiry_id: activeEnquiryForAction,
+            override_reason_code: reasonCode,
+            justification: justification
+          })
+        });
+        const result = await response.json();
+        if (response.status === 400) {
+          alert("Từ chối (HTTP 400): " + (result.detail || "Thiếu lý do ghi đè"));
+          return;
+        }
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+
+        $("modal-override").classList.remove("show");
+        showMessage("ok", `Đã ghi đè thứ tự cho ${activeEnquiryForAction} và lưu vào telemetry`, 2500);
+        await loadQueue();
+      } catch (error) {
+        alert("Lỗi ghi đè: " + error.message);
+      }
+    }
+
+    // Event Listeners cho Modals PLPT-42
+    $("btn-cancel-review").addEventListener("click", () => $("modal-review").classList.remove("show"));
+    $("btn-submit-review").addEventListener("click", handleConfirmReview);
+    $("btn-cancel-override").addEventListener("click", () => $("modal-override").classList.remove("show"));
+    $("btn-submit-override").addEventListener("click", handleConfirmOverride);
+
     /* ---------- Sự kiện ---------- */
 
     document.querySelectorAll(".tab").forEach(tab => {
@@ -630,6 +829,8 @@
             ? "Hồ sơ chưa có kết quả scoring trong snapshot queue hiện tại."
             : "Hồ sơ bị cách ly khi kiểm tra dữ liệu, kèm lý do nếu có.";
         $("search-input").value = "";
+        currentPayload = null;
+        renderQueue();
         loadQueue();
       });
     });

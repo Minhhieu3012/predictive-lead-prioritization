@@ -272,3 +272,38 @@ def test_gate_g1_failure_modes_and_single_use_lock(tmp_path: Path):
         data_origin="REAL",
     )
     assert rep_rev["gate_g1_decision"] == "FALLBACK_RULES_BASELINE"
+
+
+def test_paired_bootstrap_insufficient_clusters():
+    # 3 clusters (< min_clusters=10): model chọn toàn POSITIVE, baseline chọn toàn NEGATIVE
+    sealed_df = pd.DataFrame([
+        {"enquiry_id": "C1-M", "account_key": "A1", "t0_time": "2026-09-01T08:00:00+07:00", "label": "POSITIVE"},
+        {"enquiry_id": "C1-B", "account_key": "A1", "t0_time": "2026-09-01T08:00:00+07:00", "label": "NEGATIVE"},
+        {"enquiry_id": "C2-M", "account_key": "A2", "t0_time": "2026-09-02T08:00:00+07:00", "label": "POSITIVE"},
+        {"enquiry_id": "C2-B", "account_key": "A2", "t0_time": "2026-09-02T08:00:00+07:00", "label": "NEGATIVE"},
+        {"enquiry_id": "C3-M", "account_key": "A3", "t0_time": "2026-09-03T08:00:00+07:00", "label": "POSITIVE"},
+        {"enquiry_id": "C3-B", "account_key": "A3", "t0_time": "2026-09-03T08:00:00+07:00", "label": "NEGATIVE"},
+    ])
+    res_low = run_paired_cluster_bootstrap(
+        sealed_df,
+        baseline_selected_ids={"C1-B", "C2-B", "C3-B"},
+        model_selected_ids={"C1-M", "C2-M", "C3-M"},
+        n_bootstrap=200,
+        random_state=42,
+        min_clusters=10,
+    )
+    assert res_low["n_clusters"] == 3
+    assert res_low["sufficient_clusters"] is False
+    assert res_low["ci_lower_bound_exceeds_zero"] is False
+
+    res_ok = run_paired_cluster_bootstrap(
+        sealed_df,
+        baseline_selected_ids={"C1-B", "C2-B", "C3-B"},
+        model_selected_ids={"C1-M", "C2-M", "C3-M"},
+        n_bootstrap=200,
+        random_state=42,
+        min_clusters=3,
+    )
+    assert res_ok["n_clusters"] == 3
+    assert res_ok["sufficient_clusters"] is True
+    assert res_ok["ci_lower_bound_exceeds_zero"] is True

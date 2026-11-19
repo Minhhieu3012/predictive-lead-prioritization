@@ -13,17 +13,21 @@ def run_paired_cluster_bootstrap(
     *,
     n_bootstrap: int = 10000,
     random_state: int = 42,
+    min_clusters: int = 10,
 ) -> dict[str, Any]:
     """
     Thực hiện Paired Cluster Bootstrap (B = 10,000 mặc định, random_state = 42)
     gom cụm theo (cohort_date_block, account_key) để tính khoảng tin cậy 95% (2.5% - 97.5%)
     cho Delta = Precision@K(model) - Precision@K(baseline).
+    Nếu n_clusters < min_clusters, trả sufficient_clusters=False và ép ci_lower_bound_exceeds_zero=False.
     """
     if sealed_df.empty:
         return {
             "n_bootstrap": n_bootstrap,
             "random_state": random_state,
+            "min_clusters": min_clusters,
             "n_clusters": 0,
+            "sufficient_clusters": False,
             "paired_diff_mean": 0.0,
             "paired_95_ci": [0.0, 0.0],
             "ci_lower_bound_exceeds_zero": False,
@@ -46,11 +50,13 @@ def run_paired_cluster_bootstrap(
     )
 
     n_clusters = len(grouped)
-    if n_clusters == 0:
+    if n_clusters < min_clusters:
         return {
             "n_bootstrap": n_bootstrap,
             "random_state": random_state,
-            "n_clusters": 0,
+            "min_clusters": min_clusters,
+            "n_clusters": n_clusters,
+            "sufficient_clusters": False,
             "paired_diff_mean": 0.0,
             "paired_95_ci": [0.0, 0.0],
             "ci_lower_bound_exceeds_zero": False,
@@ -73,7 +79,9 @@ def run_paired_cluster_bootstrap(
     return {
         "n_bootstrap": n_bootstrap,
         "random_state": random_state,
+        "min_clusters": min_clusters,
         "n_clusters": n_clusters,
+        "sufficient_clusters": True,
         "paired_diff_mean": round(mean_diff, 4),
         "paired_95_ci": [round(ci_low, 4), round(ci_high, 4)],
         "ci_lower_bound_exceeds_zero": ci_low > 0.0,

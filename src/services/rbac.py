@@ -24,7 +24,7 @@ class AuthContext:
 def is_rbac_enforced_on_legacy() -> bool:
     """
     Giữ cờ cấu hình để không làm gãy 35 unit test MVP cũ khi test cũ chưa truyền header auth.
-    Mặc định False trên /api/queue và /api/block nếu không có header; bật True qua RBAC_ENFORCE_LEGACY=true.
+    Mặc định True trên /api/queue và /api/block; có thể đặt RBAC_ENFORCE_LEGACY=false nếu cần tắt cho bộ test MVP cũ không truyền header auth.
     """
     return os.getenv("RBAC_ENFORCE_LEGACY", "true").strip().lower() in {"1", "true", "yes"}
 

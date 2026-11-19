@@ -64,3 +64,4 @@ File ghi nhận kết quả thẩm định cơ hội trong cửa sổ quan sát 
 
 - Các dòng lỗi ở `outcome_events.csv` (thiếu trường bắt buộc, sai danh mục `label`/`maturity_state`, hoặc `observation_window_days < 0`) được tách riêng ra `data/quarantine/quarantine_outcomes.csv` kèm cột `quarantine_reason`.
 - **Phạm vi dữ liệu giả lập (Gate G0) & Điều kiện Gate G1:** Toàn bộ 1.260 dòng CSV hiện tại trong `data/raw/` (1.250 hợp lệ + 10 dòng lỗi `ERR-0001`–`ERR-0010`) là dữ liệu giả lập (synthetic) sinh từ `scripts/generate_songnhat_data.py`, chỉ phục vụ kiểm thử pipeline Rules-First MVP với tỷ lệ `150 POSITIVE / 850 NEGATIVE` (train), `50 POSITIVE / 150 NEGATIVE` (test) và `50 Unknown` (`OPEN_24H`). Trước khi thẩm định mô hình ML tại Gate G1, phải tiếp nhận và kiểm toán dữ liệu lịch sử thật của SongNhat đạt tối thiểu `>= 1.000` hồ sơ distinct đã chín đủ 60 ngày, có ít nhất `100 POSITIVE` và `100 NEGATIVE` đã xác minh.
+

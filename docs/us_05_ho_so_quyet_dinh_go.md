@@ -73,3 +73,4 @@ Tài liệu này tổng hợp toàn bộ kết quả giai đoạn Discovery (Spr
 | **Lead Dev** | Nguyễn Tuấn Du | Phương án (a) | Đã sẵn sàng triển khai Sprint 2 |
 | **Dev (Team 08)** | Nguyễn Tuấn Kiệt, Phạm Nguyễn Gia Khang, Đoàn Trần Nguyên Khang, Trần Quốc Khánh, Nguyễn Tấn Tài, Đặng Nguyễn Mạnh Huỳnh | Phương án (a) | Đã sẵn sàng triển khai Sprint 2 |
 | **Nhà tài trợ (Purchaser Sponsor)** | Đại diện SongNhat | Phương án (a) | Trình duyệt Gate GO |
+

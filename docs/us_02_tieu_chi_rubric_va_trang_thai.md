@@ -38,3 +38,4 @@ Các hồ sơ hợp lệ được chấm điểm minh bạch theo 4 tiêu chí s
 | **Luật ưu tiên `TIER_0`** | **Lên đầu bảng** | Áp dụng cho hồ sơ thay thế khẩn cấp hoặc còn `days_left <= 7` ngày tới hạn hợp đồng tính từ `now` (bao gồm cả đơn quá hạn `days_left < 0`; chỉ tính với đơn chưa `Closed`/`withdrawn`). |
 
 * **Mã khóa dữ liệu cũ:** Hệ thống sử dụng duy nhất mã trạng thái chuẩn `HOLD_STALE_DATA` khi tuổi dữ liệu vượt quá 24 giờ hoặc không xác minh được `extraction_time`.
+

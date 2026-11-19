@@ -29,3 +29,4 @@ data/quarantine/
 *.py[cod]
 data/songnhat.db
 data/quarantine/quarantine_rows.csv
+

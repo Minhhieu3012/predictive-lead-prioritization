@@ -1,14 +1,19 @@
-"""PLPT-26: Pre-t0 Feature Store & Anti-Leakage Controls."""
+"""PLPT-26: Pre-t0 Feature Store, Lineage Tracking & Anti-Leakage Controls."""
 
+import contextlib
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
+from pathlib import Path
+import sqlite3
 from typing import Any
 
 import pandas as pd
 
 VN_TZ = timezone(timedelta(hours=7))
 
+FEATURE_VERSION = "pre_t0_v1"
 MAX_FEATURE_COLUMNS = 30
 
 PROHIBITED_FEATURE_COLUMNS = {
@@ -98,6 +103,11 @@ APPROVED_FEATURE_DICTIONARY: dict[str, dict[str, str]] = {
         "timing": "at_t0",
         "missing_policy": "median_impute",
     },
+    "account_history_status": {
+        "type": "categorical",
+        "timing": "strictly_before_t0",
+        "missing_policy": "UNKNOWN",
+    },
 }
 
 
@@ -129,89 +139,161 @@ def get_feature_dictionary_hash(feature_cols: list[str] | None = None) -> str:
 
 def guard_no_outcome_join(columns: list[str]) -> None:
     """CF-06: Cấm tham gia bảng outcome_events vào đặc trưng phục vụ sản xuất."""
-    forbidden = {c for c in columns if c in {"label", "event_type", "qualification_evidence", "maturity_state"} or c.endswith("_DO_NOT_USE")}
+    forbidden = {
+        c
+        for c in columns
+        if c in {"label", "event_type", "qualification_evidence", "maturity_state"}
+        or c.endswith("_DO_NOT_USE")
+    }
     if forbidden:
-        raise LeakageError(f"Architectural guard: outcome/forbidden columns cannot enter scoring predictors: {sorted(forbidden)}")
+        raise LeakageError(
+            f"Architectural guard: outcome/forbidden columns cannot enter scoring predictors: {sorted(forbidden)}"
+        )
 
 
 def validate_feature_columns(feature_cols: list[str]) -> None:
     if len(feature_cols) > MAX_FEATURE_COLUMNS:
-        raise ValueError(f"Feature column count {len(feature_cols)} exceeds cap of {MAX_FEATURE_COLUMNS}.")
-    bad = [c for c in feature_cols if c in PROHIBITED_FEATURE_COLUMNS or c.endswith("_DO_NOT_USE")]
+        raise ValueError(
+            f"Feature column count {len(feature_cols)} exceeds cap of {MAX_FEATURE_COLUMNS}."
+        )
+    bad = [
+        c
+        for c in feature_cols
+        if c in PROHIBITED_FEATURE_COLUMNS or c.endswith("_DO_NOT_USE")
+    ]
     if bad:
-        raise LeakageError(f"Prohibited PII/identifier/post-t0 columns detected in predictors: {bad}")
+        raise LeakageError(
+            f"Prohibited PII/identifier/post-t0 columns detected in predictors: {bad}"
+        )
 
 
-def build_pre_t0_features(
+def _evaluate_t0_boundary(row: pd.Series) -> tuple[datetime | None, datetime | None, datetime | None, str | None]:
+    t0_dt = _parse_iso(row.get("t0_time"))
+    event_dt = _parse_iso(row.get("feature_event_time"))
+    avail_dt = _parse_iso(row.get("feature_available_at"))
+
+    if t0_dt is None:
+        return t0_dt, event_dt, avail_dt, "INVALID_T0"
+    if event_dt is not None and event_dt > t0_dt:
+        return t0_dt, event_dt, avail_dt, "FEATURE_EVENT_AFTER_T0"
+    if avail_dt is not None and avail_dt > t0_dt:
+        return t0_dt, event_dt, avail_dt, "FEATURE_AVAILABLE_AFTER_T0"
+    return t0_dt, event_dt, avail_dt, None
+
+
+def build_pre_t0_features_with_lineage(
     enquiries_df: pd.DataFrame,
     *,
     strict_leakage: bool = True,
     drop_post_t0_rows: bool = False,
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], list[dict[str, Any]]]:
     """
-    Xây dựng ma trận đặc trưng tại thời điểm t0:
+    Xây dựng ma trận đặc trưng tại thời điểm t0 kèm bảng lineage:
     1. Kiểm tra feature_available_at <= t0_time và feature_event_time <= t0_time (CF-01, CF-02).
-    2. Chặn cột *_DO_NOT_USE, PII, account_key, enquiry_id khỏi danh sách feature_cols (CF-03, CF-34).
-    3. Tính pre_t0_account_enquiry_count chỉ từ các bản ghi có t0_time < current_t0_time (CF-04).
-    4. Bảo đảm số lượng cột đặc trưng <= 30.
+    2. Chặn cột *_DO_NOT_USE, PII, account_key, enquiry_id khỏi feature_cols và không lưu account_key vào bảng đặc trưng/lineage.
+    3. Tính pre_t0_account_enquiry_count chỉ từ các bản ghi hợp lệ có t0_time < current_t0_time (CF-04) trong RAM.
+    4. Gán account_history_status minh bạch: HISTORY_FOUND / NO_PRIOR_ENQUIRY_OBSERVED / UNKNOWN.
+    5. Ghi nhận lý do từ chối vào lineage_records cho mọi bản ghi vi phạm ranh giới t0.
     """
     if enquiries_df.empty:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], []
 
     df = enquiries_df.copy()
 
     leak_cols = [
-        c for c in df.columns
-        if c.endswith("_DO_NOT_USE") or c in {"quotation_value_post_t0", "order_outcome_post_t0"}
+        c
+        for c in df.columns
+        if c.endswith("_DO_NOT_USE")
+        or c in {"quotation_value_post_t0", "order_outcome_post_t0"}
     ]
     if leak_cols:
         if strict_leakage:
-            raise LeakageError(f"Post-t0 leakage columns detected in dataset: {leak_cols}")
+            raise LeakageError(
+                f"Post-t0 leakage columns detected in dataset: {leak_cols}"
+            )
         df = df.drop(columns=leak_cols)
 
-    valid_mask = []
+    valid_mask: list[bool] = []
     parsed_t0_list: list[datetime | None] = []
-    for _, row in df.iterrows():
-        t0_dt = _parse_iso(row.get("t0_time"))
-        parsed_t0_list.append(t0_dt)
-        avail_dt = _parse_iso(row.get("feature_available_at"))
-        event_dt = _parse_iso(row.get("feature_event_time"))
+    lineage_records: list[dict[str, Any]] = []
 
-        is_leak = False
-        if t0_dt is not None:
-            if avail_dt is not None and avail_dt > t0_dt:
-                is_leak = True
-            if event_dt is not None and event_dt > t0_dt:
-                is_leak = True
-        if is_leak and strict_leakage and not drop_post_t0_rows:
+    for _, row in df.iterrows():
+        t0_dt, event_dt, avail_dt, rejection_code = _evaluate_t0_boundary(row)
+        is_post_t0_leak = rejection_code in {
+            "FEATURE_EVENT_AFTER_T0",
+            "FEATURE_AVAILABLE_AFTER_T0",
+        }
+        if is_post_t0_leak and strict_leakage and not drop_post_t0_rows:
             raise LeakageError(
                 f"Post-t0 feature leakage on enquiry_id={row.get('enquiry_id')}: "
-                f"feature_available_at={row.get('feature_available_at')} > t0_time={row.get('t0_time')}"
+                f"{rejection_code} (t0_time={row.get('t0_time')})"
             )
-        valid_mask.append(not is_leak)
+
+        is_valid = not is_post_t0_leak and rejection_code != "INVALID_T0"
+        # Giữ tương thích nếu test truyền t0_time thiếu nhưng không vi phạm post-t0 khi strict_leakage=True
+        if rejection_code == "INVALID_T0" and not drop_post_t0_rows:
+            is_valid = True
+            rejection_for_lineage = "INVALID_T0"
+        else:
+            rejection_for_lineage = rejection_code
+
+        lineage_records.append(
+            {
+                "enquiry_id": str(row.get("enquiry_id") or "").strip(),
+                "t0_time": t0_dt.astimezone(VN_TZ).isoformat(timespec="seconds")
+                if t0_dt is not None
+                else None,
+                "feature_event_time": event_dt.astimezone(VN_TZ).isoformat(timespec="seconds")
+                if event_dt is not None
+                else None,
+                "feature_available_at": avail_dt.astimezone(VN_TZ).isoformat(timespec="seconds")
+                if avail_dt is not None
+                else None,
+                "feature_status": "READY" if rejection_for_lineage is None else "REJECTED",
+                "rejection_code": rejection_for_lineage,
+            }
+        )
+        valid_mask.append(is_valid)
+        parsed_t0_list.append(t0_dt)
 
     if drop_post_t0_rows:
         df = df.loc[valid_mask].copy()
         parsed_t0_list = [dt for dt, ok in zip(parsed_t0_list, valid_mask) if ok]
 
+    if df.empty:
+        return pd.DataFrame(), [], lineage_records
+
     df["_parsed_t0"] = parsed_t0_list
 
+    # Dùng account_key chỉ trong RAM để tổng hợp lịch sử pre-t0; không lưu ra bảng đặc trưng/lineage
     acct_series = (
-        df["account_key"].fillna("").astype(str)
+        df["account_key"].fillna("").astype(str).str.strip()
         if "account_key" in df.columns
         else pd.Series([""] * len(df), index=df.index)
     )
     pre_counts: list[int] = []
+    history_statuses: list[str] = []
     acct_times: dict[str, list[datetime]] = {}
     for acct, dt in zip(acct_series, parsed_t0_list):
         if acct and dt is not None:
             acct_times.setdefault(acct, []).append(dt)
+
     for acct, dt in zip(acct_series, parsed_t0_list):
-        if not acct or dt is None:
+        if not acct:
             pre_counts.append(0)
+            history_statuses.append("UNKNOWN")
+        elif dt is None:
+            pre_counts.append(0)
+            history_statuses.append("NO_PRIOR_ENQUIRY_OBSERVED")
         else:
-            pre_counts.append(sum(1 for other_dt in acct_times.get(acct, []) if other_dt < dt))
+            cnt = sum(1 for other_dt in acct_times.get(acct, []) if other_dt < dt)
+            pre_counts.append(cnt)
+            history_statuses.append(
+                "HISTORY_FOUND" if cnt > 0 else "NO_PRIOR_ENQUIRY_OBSERVED"
+            )
+
     df["pre_t0_account_enquiry_count"] = pre_counts
+    df["account_history_status"] = history_statuses
 
     due_series = (
         df["contract_due_date"]
@@ -243,9 +325,164 @@ def build_pre_t0_features(
     )
     df["account_age_days_at_t0"] = pd.to_numeric(age_raw, errors="coerce")
 
-    feature_cols = [c for c in APPROVED_FEATURE_DICTIONARY.keys() if c in df.columns]
+    feature_cols = [
+        c for c in APPROVED_FEATURE_DICTIONARY.keys() if c in df.columns
+    ]
     validate_feature_columns(feature_cols)
 
-    meta_cols = [c for c in ("enquiry_id", "t0_time", "account_key", "feature_event_time") if c in df.columns]
+    # Không bao giờ lưu account_key vào bảng đặc trưng đầu ra
+    meta_cols = [
+        c for c in ("enquiry_id", "t0_time", "feature_event_time") if c in df.columns
+    ]
     out_df = df[meta_cols + feature_cols].copy()
+    return out_df, feature_cols, lineage_records
+
+
+def build_pre_t0_features(
+    enquiries_df: pd.DataFrame,
+    *,
+    strict_leakage: bool = True,
+    drop_post_t0_rows: bool = False,
+) -> tuple[pd.DataFrame, list[str]]:
+    out_df, feature_cols, _ = build_pre_t0_features_with_lineage(
+        enquiries_df,
+        strict_leakage=strict_leakage,
+        drop_post_t0_rows=drop_post_t0_rows,
+    )
     return out_df, feature_cols
+
+
+def _default_db_path() -> Path:
+    project_root = Path(__file__).resolve().parents[2]
+    return Path(
+        os.getenv("DATABASE_PATH", str(project_root / "data" / "songnhat.db"))
+    )
+
+
+def _ensure_feature_store_tables(
+    conn: sqlite3.Connection,
+    feature_cols: list[str],
+) -> None:
+    col_defs = []
+    for col in feature_cols:
+        col_type = APPROVED_FEATURE_DICTIONARY.get(col, {}).get("type")
+        sql_type = "REAL" if col_type == "numeric" else "TEXT"
+        col_defs.append(f'"{col}" {sql_type}')
+    cols_sql = ",\n            ".join(col_defs)
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS pre_t0_features (
+            enquiry_id TEXT PRIMARY KEY,
+            feature_version TEXT NOT NULL,
+            {cols_sql},
+            built_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pre_t0_feature_lineage (
+            enquiry_id TEXT PRIMARY KEY,
+            t0_time TEXT,
+            feature_event_time TEXT,
+            feature_available_at TEXT,
+            feature_status TEXT NOT NULL,
+            rejection_code TEXT,
+            feature_version TEXT NOT NULL,
+            built_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def build_pre_t0_store(
+    db_path: str | Path | None = None,
+) -> dict[str, int | str]:
+    """Đọc clean_enquiries, tính đặc trưng pre-t0 (mask account_key) và ghi pre_t0_features + pre_t0_feature_lineage."""
+    target_db = Path(db_path) if db_path is not None else _default_db_path()
+    if not target_db.exists():
+        raise FileNotFoundError(f"Database not found: {target_db}")
+
+    with contextlib.closing(sqlite3.connect(str(target_db))) as conn:
+        with conn:
+            conn.row_factory = sqlite3.Row
+            has_clean = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'clean_enquiries'"
+            ).fetchone()
+            if has_clean is None:
+                raise ValueError(
+                    "clean_enquiries is required; run ingestion and deduplication first"
+                )
+            rows = [
+                dict(r)
+                for r in conn.execute("SELECT * FROM clean_enquiries").fetchall()
+            ]
+
+    enq_df = pd.DataFrame(rows)
+    out_df, feature_cols, lineage_records = build_pre_t0_features_with_lineage(
+        enq_df,
+        strict_leakage=False,
+        drop_post_t0_rows=True,
+    )
+    built_at = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+
+    with contextlib.closing(sqlite3.connect(str(target_db), timeout=30.0)) as conn:
+        with conn:
+            _ensure_feature_store_tables(conn, feature_cols)
+            conn.execute("DELETE FROM pre_t0_features")
+            conn.execute("DELETE FROM pre_t0_feature_lineage")
+
+            if not out_df.empty:
+                placeholders = ", ".join("?" for _ in range(len(feature_cols) + 3))
+                cols_sql = ", ".join(f'"{c}"' for c in feature_cols)
+                insert_feat_sql = (
+                    f"INSERT INTO pre_t0_features (enquiry_id, feature_version, {cols_sql}, built_at) "
+                    f"VALUES ({placeholders})"
+                )
+                feat_rows = []
+                for _, row in out_df.iterrows():
+                    vals = [
+                        None if pd.isna(row[c]) else row[c]
+                        for c in feature_cols
+                    ]
+                    feat_rows.append(
+                        (
+                            str(row.get("enquiry_id") or "").strip(),
+                            FEATURE_VERSION,
+                            *vals,
+                            built_at,
+                        )
+                    )
+                conn.executemany(insert_feat_sql, feat_rows)
+
+            conn.executemany(
+                """
+                INSERT INTO pre_t0_feature_lineage (
+                    enquiry_id, t0_time, feature_event_time, feature_available_at,
+                    feature_status, rejection_code, feature_version, built_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        rec["enquiry_id"],
+                        rec["t0_time"],
+                        rec["feature_event_time"],
+                        rec["feature_available_at"],
+                        rec["feature_status"],
+                        rec["rejection_code"],
+                        FEATURE_VERSION,
+                        built_at,
+                    )
+                    for rec in lineage_records
+                ],
+            )
+            conn.commit()
+
+    rejected_count = sum(1 for r in lineage_records if r["feature_status"] == "REJECTED")
+    return {
+        "status": "SUCCESS",
+        "feature_version": FEATURE_VERSION,
+        "feature_count": len(out_df),
+        "rejected_count": rejected_count,
+        "feature_columns": len(feature_cols),
+    }

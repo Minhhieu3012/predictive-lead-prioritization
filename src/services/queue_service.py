@@ -1,16 +1,18 @@
-"""PLPT-24 & PLPT-25: Shared Queue, Capacity K, 10% Exploration, Overdue 2BD & Telemetry Service."""
+"""PLPT-24 & PLPT-25: Shared Queue, Capacity K, 10% Fractional-Carry Exploration, Daily Snapshot, Overdue 2BD & Telemetry Service."""
 
+import contextlib
 import csv
 from datetime import date, datetime, timedelta, timezone
+import json
 import logging
 import os
 from pathlib import Path
 import random
-import contextlib
 import sqlite3
 from typing import Any
 import unicodedata
 
+from src.config.vn_holidays import count_vn_business_days, is_vn_business_day
 from src.rules.rules_engine import (
     RULES_LABEL,
     _parse_date,
@@ -37,8 +39,6 @@ CAUSAL_DISCLAIMER = (
     "Contributing factors reflect historical qualification associations at t0, "
     "not causal proof that contacting a lead will result in a sale."
 )
-
-from src.config.vn_holidays import count_vn_business_days, is_vn_business_day
 
 
 def get_daily_capacity_k() -> int:
@@ -80,9 +80,6 @@ def strip_vietnamese_diacritics(text: str) -> str:
     s = str(text).replace("đ", "d").replace("Đ", "D")
     nfd = unicodedata.normalize("NFD", s)
     return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn").lower()
-
-
-
 
 
 def ensure_operational_tables(conn: sqlite3.Connection) -> None:
@@ -134,6 +131,26 @@ def ensure_operational_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_queue_allocations (
+            business_date TEXT PRIMARY KEY,
+            capacity_k INTEGER NOT NULL,
+            mandatory_count INTEGER NOT NULL,
+            discretionary_slots INTEGER NOT NULL,
+            ranked_slots INTEGER NOT NULL,
+            exploration_slots INTEGER NOT NULL,
+            exploration_seed INTEGER NOT NULL,
+            carry_in_tenths INTEGER NOT NULL,
+            carry_out_tenths INTEGER NOT NULL,
+            capacity_exceeded_by INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            selected_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
 
 
@@ -176,7 +193,7 @@ def read_quarantine_records() -> list[dict[str, Any]]:
     return records
 
 
-def load_enquiries_and_meta() -> tuple[
+def load_enquiries_and_meta(now: datetime | None = None) -> tuple[
     list[dict[str, Any]],
     set[str],
     set[str],
@@ -194,7 +211,7 @@ def load_enquiries_and_meta() -> tuple[
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
         with conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -271,7 +288,7 @@ def load_enquiries_and_meta() -> tuple[
             if not enquiries or has_unverified_extraction or latest_ext is None:
                 age_hours: float | None = None
             else:
-                now_vn = datetime.now(VN_TZ)
+                now_vn = now or datetime.now(VN_TZ)
                 age_hours = max(0.0, round((now_vn - latest_ext).total_seconds() / 3600.0, 2))
 
             return (
@@ -298,87 +315,15 @@ def _format_sla_due_timestamp(raw_due: Any) -> str | None:
     return None
 
 
-def allocate_daily_k_slots(
-    ranked_entries: list[dict[str, Any]],
-    capacity_k: int,
-    seed: int | None = None,
-    overridden_enquiries: set[str] | None = None,
-    reviewed_enquiries: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], int, bool, int]:
-    """
-    PLPT-24: Tách logic chọn K slot trong ngày khỏi limit phân trang:
-    - TIER_0 bắt buộc lên đầu.
-    - Nếu N_mandatory >= K: lấy K hồ sơ TIER_0, is_overloaded = True; nếu có OVERRIDE_PRIORITY ngoài Top-K
-      thì tạm cho phép tổng hiển thị = K + số ca override.
-    - Ngược lại: K_disc = K - N_mandatory; khi K_disc >= 5 thì K_explore = round(0.10 * K_disc).
-    - Nếu có OVERRIDE_PRIORITY nằm ngoài Top-K: kéo lên Active (ngay sau TIER_0) và đẩy 1 hồ sơ
-      không phải TIER_0 có rule_score thấp nhất chưa review ra ngoài Top-K.
-    """
-    if seed is None:
-        env_seed = os.getenv("EXPLORATION_SEED")
-        if env_seed is not None and env_seed.strip().isdigit():
-            seed = int(env_seed.strip())
-        else:
-            seed = int(datetime.now(VN_TZ).strftime("%Y%m%d"))
-
-    logger.info("PLPT-24 K-slot allocation started: K=%d, seed=%d, eligible=%d", capacity_k, seed, len(ranked_entries))
-
-    ov_set = overridden_enquiries or set()
-    rev_set = reviewed_enquiries or set()
-
-    tier0_items = [e for e in ranked_entries if e.get("tier0_bypass")]
-    non_tier0_items = [e for e in ranked_entries if not e.get("tier0_bypass")]
-
-    n_mandatory = len(tier0_items)
-    if n_mandatory >= capacity_k:
-        selected: list[dict[str, Any]] = []
-        for item in tier0_items[:capacity_k]:
-            copied = dict(item)
-            copied["allocation_type"] = "TIER_0_MANDATORY"
-            selected.append(copied)
-        selected_ids = {str(x.get("enquiry_id") or "").strip() for x in selected}
-        for item in ranked_entries:
-            eid = str(item.get("enquiry_id") or "").strip()
-            if eid in ov_set and eid not in selected_ids:
-                copied = dict(item)
-                copied["allocation_type"] = "OVERRIDE_PROMOTED"
-                selected.append(copied)
-                selected_ids.add(eid)
-        for idx, item in enumerate(selected, start=1):
-            item["final_work_order"] = idx
-        return selected, 0, True, seed
-
-    k_disc = capacity_k - n_mandatory
-    k_explore = round(0.10 * k_disc) if k_disc >= 5 else 0
-    k_ranked = k_disc - k_explore
-
-    selected = []
-    for item in tier0_items:
-        copied = dict(item)
-        copied["allocation_type"] = "TIER_0_MANDATORY"
-        selected.append(copied)
-
-    top_ranked = non_tier0_items[:k_ranked]
-    remaining_pool = non_tier0_items[k_ranked:]
-
-    for item in top_ranked:
-        copied = dict(item)
-        copied["allocation_type"] = "TOP_RANKED"
-        selected.append(copied)
-
-    actual_explore = min(k_explore, len(remaining_pool))
-    if actual_explore > 0:
-        rng = random.Random(seed)
-        sampled = rng.sample(remaining_pool, actual_explore)
-        for item in sampled:
-            copied = dict(item)
-            copied["allocation_type"] = "EXPLORATION_10PCT"
-            selected.append(copied)
-
-    # Kéo các hồ sơ OVERRIDE_PRIORITY ngoài Top-K vào Active và đẩy hồ sơ không phải TIER_0 điểm thấp nhất chưa review ra ngoài
+def _apply_overrides_and_reorder(
+    selected: list[dict[str, Any]],
+    non_mandatory_items: list[dict[str, Any]],
+    ov_set: set[str],
+    rev_set: set[str],
+) -> list[dict[str, Any]]:
     selected_ids = {str(x.get("enquiry_id") or "").strip() for x in selected}
     outside_overrides = [
-        item for item in non_tier0_items
+        item for item in non_mandatory_items
         if str(item.get("enquiry_id") or "").strip() in ov_set
         and str(item.get("enquiry_id") or "").strip() not in selected_ids
     ]
@@ -405,18 +350,316 @@ def allocate_daily_k_slots(
         copied["allocation_type"] = "OVERRIDE_PROMOTED"
         selected.append(copied)
 
-    # Cập nhật final_work_order theo TIER_0 -> OVERRIDE_PRIORITY -> các hồ sơ còn lại (giữ nguyên model_rank)
     if ov_set:
         tier0_part = [x for x in selected if x.get("allocation_type") == "TIER_0_MANDATORY"]
-        ov_part = [x for x in selected if x.get("allocation_type") != "TIER_0_MANDATORY" and str(x.get("enquiry_id") or "").strip() in ov_set]
-        rest_part = [x for x in selected if x.get("allocation_type") != "TIER_0_MANDATORY" and str(x.get("enquiry_id") or "").strip() not in ov_set]
+        ov_part = [
+            x for x in selected
+            if x.get("allocation_type") != "TIER_0_MANDATORY"
+            and str(x.get("enquiry_id") or "").strip() in ov_set
+        ]
+        rest_part = [
+            x for x in selected
+            if x.get("allocation_type") != "TIER_0_MANDATORY"
+            and str(x.get("enquiry_id") or "").strip() not in ov_set
+        ]
         selected = tier0_part + ov_part + rest_part
 
     for idx, item in enumerate(selected, start=1):
         item["final_work_order"] = idx
+    return selected
 
+
+def allocate_daily_k_slots_with_carry(
+    ranked_entries: list[dict[str, Any]],
+    capacity_k: int,
+    seed: int | None = None,
+    overridden_enquiries: set[str] | None = None,
+    reviewed_enquiries: set[str] | None = None,
+    carry_in_tenths: int = 0,
+) -> dict[str, Any]:
+    """
+    PLPT-24: Phân bổ K slot trong ngày kèm tích lũy phần lẻ 10% exploration (fractional carry):
+    - Hồ sơ bắt buộc (TIER_0 hoặc quá hạn 2BD) luôn lên đầu.
+    - Nếu M > K: giữ toàn bộ M hồ sơ bắt buộc trong hàng đợi, exploration = 0,
+      giữ nguyên carry_out_tenths = carry_in_tenths, trả status = "CAPACITY_EXCEEDED"
+      và capacity_exceeded_by = M - K.
+    - Ngược lại: D = max(0, K - M), quota_tenths = carry_in_tenths + D,
+      exploration_count = min(quota_tenths // 10, D), carry_out_tenths = quota_tenths - actual_explore * 10.
+    """
+    if seed is None:
+        env_seed = os.getenv("EXPLORATION_SEED")
+        if env_seed is not None and env_seed.strip().isdigit():
+            seed = int(env_seed.strip())
+        else:
+            seed = int(datetime.now(VN_TZ).strftime("%Y%m%d"))
+
+    ov_set = overridden_enquiries or set()
+    rev_set = reviewed_enquiries or set()
+
+    mandatory_items = [
+        e for e in ranked_entries
+        if bool(e.get("tier0_bypass")) or bool(e.get("is_overdue_2bd"))
+    ]
+    non_mandatory_items = [
+        e for e in ranked_entries
+        if not (bool(e.get("tier0_bypass")) or bool(e.get("is_overdue_2bd")))
+    ]
+
+    n_mandatory = len(mandatory_items)
+    capacity_exceeded_by = max(0, n_mandatory - capacity_k)
+
+    logger.info(
+        "PLPT-24 K-slot allocation: K=%d, M=%d, carry_in_tenths=%d, seed=%d, eligible=%d",
+        capacity_k,
+        n_mandatory,
+        carry_in_tenths,
+        seed,
+        len(ranked_entries),
+    )
+
+    if capacity_exceeded_by > 0:
+        selected: list[dict[str, Any]] = []
+        for item in mandatory_items:
+            copied = dict(item)
+            copied["allocation_type"] = "TIER_0_MANDATORY"
+            selected.append(copied)
+        selected_ids = {str(x.get("enquiry_id") or "").strip() for x in selected}
+        for item in ranked_entries:
+            eid = str(item.get("enquiry_id") or "").strip()
+            if eid in ov_set and eid not in selected_ids:
+                copied = dict(item)
+                copied["allocation_type"] = "OVERRIDE_PROMOTED"
+                selected.append(copied)
+                selected_ids.add(eid)
+        for idx, item in enumerate(selected, start=1):
+            item["final_work_order"] = idx
+        return {
+            "selected": selected,
+            "mandatory_count": n_mandatory,
+            "discretionary_slots": 0,
+            "ranked_slots": 0,
+            "exploration_count": 0,
+            "is_overloaded": True,
+            "capacity_exceeded_by": capacity_exceeded_by,
+            "status": "CAPACITY_EXCEEDED",
+            "seed": seed,
+            "carry_in_tenths": carry_in_tenths,
+            "carry_out_tenths": carry_in_tenths,
+        }
+
+    k_disc = max(0, capacity_k - n_mandatory)
+    quota_tenths = carry_in_tenths + k_disc
+    k_explore = min(quota_tenths // 10, k_disc)
+    k_ranked = k_disc - k_explore
+
+    selected = []
+    for item in mandatory_items:
+        copied = dict(item)
+        copied["allocation_type"] = "TIER_0_MANDATORY"
+        selected.append(copied)
+
+    top_ranked = non_mandatory_items[:k_ranked]
+    remaining_pool = non_mandatory_items[k_ranked:]
+
+    for item in top_ranked:
+        copied = dict(item)
+        copied["allocation_type"] = "TOP_RANKED"
+        selected.append(copied)
+
+    actual_explore = min(k_explore, len(remaining_pool))
+    if actual_explore > 0:
+        rng = random.Random(seed)
+        sampled = rng.sample(remaining_pool, actual_explore)
+        for item in sampled:
+            copied = dict(item)
+            copied["allocation_type"] = "EXPLORATION_10PCT"
+            selected.append(copied)
+
+    carry_out_tenths = quota_tenths - actual_explore * 10
+
+    selected = _apply_overrides_and_reorder(selected, non_mandatory_items, ov_set, rev_set)
     actual_explore_final = sum(1 for x in selected if x.get("allocation_type") == "EXPLORATION_10PCT")
-    return selected, actual_explore_final, False, seed
+
+    return {
+        "selected": selected,
+        "mandatory_count": n_mandatory,
+        "discretionary_slots": k_disc,
+        "ranked_slots": len(top_ranked),
+        "exploration_count": actual_explore_final,
+        "is_overloaded": False,
+        "capacity_exceeded_by": 0,
+        "status": "OK",
+        "seed": seed,
+        "carry_in_tenths": carry_in_tenths,
+        "carry_out_tenths": carry_out_tenths,
+    }
+
+
+def allocate_daily_k_slots(
+    ranked_entries: list[dict[str, Any]],
+    capacity_k: int,
+    seed: int | None = None,
+    overridden_enquiries: set[str] | None = None,
+    reviewed_enquiries: set[str] | None = None,
+    carry_in_tenths: int = 0,
+) -> tuple[list[dict[str, Any]], int, bool, int]:
+    res = allocate_daily_k_slots_with_carry(
+        ranked_entries,
+        capacity_k=capacity_k,
+        seed=seed,
+        overridden_enquiries=overridden_enquiries,
+        reviewed_enquiries=reviewed_enquiries,
+        carry_in_tenths=carry_in_tenths,
+    )
+    return (
+        res["selected"],
+        res["exploration_count"],
+        res["is_overloaded"],
+        res["seed"],
+    )
+
+
+def _get_or_create_daily_snapshot(
+    *,
+    db_path: Path,
+    business_date: str,
+    active_candidates: list[dict[str, Any]],
+    capacity_k: int,
+    overridden_enquiries: set[str],
+    reviewed_enquiries: set[str],
+) -> dict[str, Any]:
+    candidate_by_id = {
+        str(e.get("enquiry_id") or "").strip(): e
+        for e in active_candidates
+    }
+    non_mandatory_items = [
+        e for e in active_candidates
+        if not (bool(e.get("tier0_bypass")) or bool(e.get("is_overdue_2bd")))
+    ]
+
+    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
+        with conn:
+            conn.row_factory = sqlite3.Row
+            ensure_operational_tables(conn)
+
+            existing = conn.execute(
+                "SELECT * FROM daily_queue_allocations WHERE business_date = ?",
+                (business_date,),
+            ).fetchone()
+
+            if existing is not None and int(existing["capacity_k"]) == capacity_k:
+                locked_selected_meta = json.loads(existing["selected_json"])
+                selected: list[dict[str, Any]] = []
+                for meta in locked_selected_meta:
+                    eid = str(meta.get("enquiry_id") or "").strip()
+                    if eid in candidate_by_id:
+                        copied = dict(candidate_by_id[eid])
+                        copied["allocation_type"] = meta.get("allocation_type", "TOP_RANKED")
+                        selected.append(copied)
+
+                selected = _apply_overrides_and_reorder(
+                    selected,
+                    non_mandatory_items,
+                    overridden_enquiries,
+                    reviewed_enquiries,
+                )
+                explore_cnt = sum(
+                    1 for x in selected if x.get("allocation_type") == "EXPLORATION_10PCT"
+                )
+                return {
+                    "selected": selected,
+                    "exploration_count": explore_cnt,
+                    "is_overloaded": int(existing["capacity_exceeded_by"]) > 0,
+                    "capacity_exceeded_by": int(existing["capacity_exceeded_by"]),
+                    "status": str(existing["status"]),
+                    "seed": int(existing["exploration_seed"]),
+                    "carry_in_tenths": int(existing["carry_in_tenths"]),
+                    "carry_out_tenths": int(existing["carry_out_tenths"]),
+                }
+
+            prev_row = conn.execute(
+                """
+                SELECT carry_out_tenths FROM daily_queue_allocations
+                WHERE business_date < ?
+                ORDER BY business_date DESC
+                LIMIT 1
+                """,
+                (business_date,),
+            ).fetchone()
+            carry_in_tenths = int(prev_row["carry_out_tenths"]) if prev_row is not None else 0
+
+            alloc = allocate_daily_k_slots_with_carry(
+                active_candidates,
+                capacity_k=capacity_k,
+                overridden_enquiries=overridden_enquiries,
+                reviewed_enquiries=reviewed_enquiries,
+                carry_in_tenths=carry_in_tenths,
+            )
+
+            selected_meta = [
+                {
+                    "enquiry_id": str(item.get("enquiry_id") or "").strip(),
+                    "allocation_type": item.get("allocation_type", "TOP_RANKED"),
+                    "final_work_order": int(item.get("final_work_order") or idx),
+                }
+                for idx, item in enumerate(alloc["selected"], start=1)
+            ]
+            created_at = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE daily_queue_allocations
+                    SET capacity_k = ?, mandatory_count = ?, discretionary_slots = ?,
+                        ranked_slots = ?, exploration_slots = ?, exploration_seed = ?,
+                        carry_in_tenths = ?, carry_out_tenths = ?, capacity_exceeded_by = ?,
+                        status = ?, selected_json = ?, created_at = ?
+                    WHERE business_date = ?
+                    """,
+                    (
+                        capacity_k,
+                        alloc["mandatory_count"],
+                        alloc["discretionary_slots"],
+                        alloc["ranked_slots"],
+                        alloc["exploration_count"],
+                        alloc["seed"],
+                        alloc["carry_in_tenths"],
+                        alloc["carry_out_tenths"],
+                        alloc["capacity_exceeded_by"],
+                        alloc["status"],
+                        json.dumps(selected_meta),
+                        created_at,
+                        business_date,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO daily_queue_allocations (
+                        business_date, capacity_k, mandatory_count, discretionary_slots,
+                        ranked_slots, exploration_slots, exploration_seed,
+                        carry_in_tenths, carry_out_tenths, capacity_exceeded_by,
+                        status, selected_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        business_date,
+                        capacity_k,
+                        alloc["mandatory_count"],
+                        alloc["discretionary_slots"],
+                        alloc["ranked_slots"],
+                        alloc["exploration_count"],
+                        alloc["seed"],
+                        alloc["carry_in_tenths"],
+                        alloc["carry_out_tenths"],
+                        alloc["capacity_exceeded_by"],
+                        alloc["status"],
+                        json.dumps(selected_meta),
+                        created_at,
+                    ),
+                )
+            conn.commit()
+            return alloc
 
 
 def build_workspace_queue_payload(
@@ -429,6 +672,7 @@ def build_workspace_queue_payload(
     capacity_k: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    now_vn = now or datetime.now(VN_TZ)
     (
         enquiries,
         blocked_enquiries,
@@ -437,9 +681,7 @@ def build_workspace_queue_payload(
         reviewed_enquiries,
         overridden_enquiries,
         steward_count,
-    ) = load_enquiries_and_meta()
-
-    now_vn = now or datetime.now(VN_TZ)
+    ) = load_enquiries_and_meta(now=now_vn)
     k = capacity_k if capacity_k is not None else get_daily_capacity_k()
     scoring_mode = get_active_scoring_mode()
     quarantine_count = count_quarantine_rows()
@@ -482,6 +724,9 @@ def build_workspace_queue_payload(
             "capacity_k": k,
             "exploration_slots_allocated": 0,
             "exploration_seed": None,
+            "carry_in_tenths": 0,
+            "carry_out_tenths": 0,
+            "capacity_exceeded_by": 0,
             "overdue_2bd_count": 0,
             "is_overloaded": False,
             "quarantine_count": quarantine_count,
@@ -535,14 +780,33 @@ def build_workspace_queue_payload(
         else:
             active_candidates.append(entry)
 
-    allocated, explore_count, tier0_overloaded, used_seed = allocate_daily_k_slots(
-        active_candidates,
-        capacity_k=k,
-        overridden_enquiries=overridden_enquiries,
-        reviewed_enquiries=reviewed_enquiries,
-    )
+    if is_stale:
+        alloc = allocate_daily_k_slots_with_carry(
+            active_candidates,
+            capacity_k=k,
+            overridden_enquiries=overridden_enquiries,
+            reviewed_enquiries=reviewed_enquiries,
+        )
+    else:
+        alloc = _get_or_create_daily_snapshot(
+            db_path=get_db_path(),
+            business_date=cohort_id,
+            active_candidates=active_candidates,
+            capacity_k=k,
+            overridden_enquiries=overridden_enquiries,
+            reviewed_enquiries=reviewed_enquiries,
+        )
+
+    allocated = alloc["selected"]
+    explore_count = alloc["exploration_count"]
+    used_seed = alloc["seed"]
+    carry_in_tenths = alloc["carry_in_tenths"]
+    carry_out_tenths = alloc["carry_out_tenths"]
+    capacity_exceeded_by = alloc["capacity_exceeded_by"]
     allocated_ids = {str(e.get("enquiry_id") or "").strip() for e in allocated}
-    is_overloaded = tier0_overloaded or (overdue_2bd_count > k)
+    is_overloaded = bool(alloc["is_overloaded"]) or (overdue_2bd_count > k)
+    if not is_stale and capacity_exceeded_by > 0:
+        status = "CAPACITY_EXCEEDED"
 
     if view == "unscored":
         unscored_entries = list(unscored_only)
@@ -579,6 +843,9 @@ def build_workspace_queue_payload(
             "capacity_k": k,
             "exploration_slots_allocated": 0,
             "exploration_seed": None,
+            "carry_in_tenths": carry_in_tenths,
+            "carry_out_tenths": carry_out_tenths,
+            "capacity_exceeded_by": capacity_exceeded_by,
             "overdue_2bd_count": overdue_2bd_count,
             "is_overloaded": is_overloaded,
             "quarantine_count": quarantine_count,
@@ -634,6 +901,9 @@ def build_workspace_queue_payload(
         "capacity_k": k,
         "exploration_slots_allocated": explore_count if not is_stale else 0,
         "exploration_seed": used_seed,
+        "carry_in_tenths": carry_in_tenths,
+        "carry_out_tenths": carry_out_tenths,
+        "capacity_exceeded_by": capacity_exceeded_by,
         "overdue_2bd_count": overdue_2bd_count,
         "is_overloaded": is_overloaded,
         "quarantine_count": quarantine_count,
@@ -700,15 +970,12 @@ def _filter_by_vn_query(items: list[dict[str, Any]], query_text: str) -> list[di
                 " ".join(item.get("reasons") or []),
             ]
         )
-        # Hỗ trợ khớp cả mã chuẩn lẫn tên tiếng Việt không dấu (vd: "dong co" khớp "Motor_DongCo")
         normalized_hay = strip_vietnamese_diacritics(haystack).replace("_", " ")
         compact_hay = normalized_hay.replace(" ", "")
         compact_needle = needle.replace(" ", "")
         if needle in normalized_hay or (compact_needle and compact_needle in compact_hay):
             matched.append(item)
     return matched
-
-
 
 
 class WorkspaceActionError(Exception):
@@ -741,6 +1008,7 @@ def _assert_enquiry_actionable(enquiry_id: str) -> None:
     if enquiry_id in blocked_enquiries or (acct_key and acct_key in blocked_accounts):
         raise WorkspaceActionError(409, f"Hồ sơ {enquiry_id} đã bị chặn (blocked); từ chối thao tác.")
 
+
 def record_workspace_review(payload: dict[str, Any], user_id: str) -> dict[str, Any]:
     enquiry_id = str(payload.get("enquiry_id") or "").strip()
     decision_type = str(payload.get("decision_type") or "ACCEPT_PRIORITY").strip().upper()
@@ -760,7 +1028,7 @@ def record_workspace_review(payload: dict[str, Any], user_id: str) -> dict[str, 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
 
     db_path = get_db_path()
-    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
         with conn:
             ensure_operational_tables(conn)
             conn.execute(
@@ -813,7 +1081,7 @@ def record_workspace_override(payload: dict[str, Any], user_id: str) -> dict[str
 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
     db_path = get_db_path()
-    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
         with conn:
             ensure_operational_tables(conn)
             conn.execute(

@@ -307,3 +307,89 @@ def test_paired_bootstrap_insufficient_clusters():
     assert res_ok["n_clusters"] == 3
     assert res_ok["sufficient_clusters"] is True
     assert res_ok["ci_lower_bound_exceeds_zero"] is True
+
+
+def test_pre_t0_store_lineage_and_account_masking(tmp_path: Path):
+    import contextlib
+    import sqlite3
+    from src.features.pre_t0_store import build_pre_t0_store
+
+    db_path = tmp_path / "feat_store.db"
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE clean_enquiries (
+                    enquiry_id TEXT PRIMARY KEY,
+                    account_key TEXT,
+                    t0_time TEXT,
+                    product_family TEXT,
+                    spec_completeness TEXT,
+                    is_urgent_replacement TEXT,
+                    contract_due_date TEXT,
+                    industry_at_t0 TEXT,
+                    enquiry_channel_at_t0 TEXT,
+                    region_at_t0 TEXT,
+                    account_age_days_at_t0 INTEGER,
+                    prior_purchase_count_at_t0 INTEGER,
+                    estimated_value_band_at_t0 TEXT,
+                    feature_event_time TEXT,
+                    feature_available_at TEXT
+                )
+                """
+            )
+            conn.executemany(
+                "INSERT INTO clean_enquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        "E-OK-1", "ACCT-1", "2026-10-01T08:00:00+07:00",
+                        "Motor_DongCo", "Full", "Normal", "2026-10-20",
+                        "Manufacturing", "WEB_FORM", "South", 100, 1, "HIGH",
+                        "2026-10-01T08:00:00+07:00", "2026-10-01T08:00:00+07:00",
+                    ),
+                    (
+                        "E-OK-2", "ACCT-1", "2026-10-05T08:00:00+07:00",
+                        "Drive_BienTan", "Partial", "Normal", "2026-10-25",
+                        "Manufacturing", "DIRECT_EMAIL", "South", 104, 1, "MEDIUM",
+                        "2026-10-05T08:00:00+07:00", "2026-10-05T08:00:00+07:00",
+                    ),
+                    (
+                        "E-NO-ACCT", "", "2026-10-06T08:00:00+07:00",
+                        "Motor_DongCo", "Full", "Normal", "2026-10-26",
+                        "Manufacturing", "WEB_FORM", "North", None, None, "LOW",
+                        "2026-10-06T08:00:00+07:00", "2026-10-06T08:00:00+07:00",
+                    ),
+                    (
+                        "E-LEAK", "ACCT-9", "2026-10-01T08:00:00+07:00",
+                        "Motor_DongCo", "Full", "Normal", "2026-10-20",
+                        "Manufacturing", "WEB_FORM", "South", 50, 0, "HIGH",
+                        "2026-10-01T09:00:00+07:00", "2026-10-01T08:00:00+07:00",
+                    ),
+                ],
+            )
+            conn.commit()
+
+    res = build_pre_t0_store(db_path)
+    assert res["status"] == "SUCCESS"
+    assert res["feature_count"] == 3
+    assert res["rejected_count"] == 1
+
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.row_factory = sqlite3.Row
+            feat_cols = {r["name"] for r in conn.execute("PRAGMA table_info(pre_t0_features)").fetchall()}
+            lin_cols = {r["name"] for r in conn.execute("PRAGMA table_info(pre_t0_feature_lineage)").fetchall()}
+            assert "account_key" not in feat_cols
+            assert "account_key" not in lin_cols
+
+            feats = {r["enquiry_id"]: dict(r) for r in conn.execute("SELECT * FROM pre_t0_features").fetchall()}
+            assert feats["E-OK-1"]["account_history_status"] == "NO_PRIOR_ENQUIRY_OBSERVED"
+            assert feats["E-OK-2"]["account_history_status"] == "HISTORY_FOUND"
+            assert feats["E-NO-ACCT"]["account_history_status"] == "UNKNOWN"
+            assert "E-LEAK" not in feats
+
+            lin = {r["enquiry_id"]: dict(r) for r in conn.execute("SELECT * FROM pre_t0_feature_lineage").fetchall()}
+            assert lin["E-LEAK"]["feature_status"] == "REJECTED"
+            assert lin["E-LEAK"]["rejection_code"] == "FEATURE_EVENT_AFTER_T0"
+            assert lin["E-OK-1"]["feature_status"] == "READY"
+            assert lin["E-OK-1"]["rejection_code"] is None

@@ -106,7 +106,9 @@ def test_workspace_tier0_overload_sets_zero_exploration(tmp_path: Path, monkeypa
     assert res.status_code == 200
     body = res.json()
     assert body["capacity_k"] == 25
-    assert body["total"] == 25
+    assert body["status"] == "CAPACITY_EXCEEDED"
+    assert body["capacity_exceeded_by"] == 1
+    assert body["total"] == 26
     assert body["exploration_slots_allocated"] == 0
     assert body["is_overloaded"] is True
     assert all(item["is_urgent"] is True for item in body["items"])
@@ -401,3 +403,44 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
         json={"enquiry_id": "SN-0001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True},
         headers={"X-User-Role": "SALES_READER"},
     ).status_code == 423
+
+
+def test_fractional_carry_across_consecutive_days_and_idempotency(tmp_path: Path, monkeypatch):
+    from src.services.queue_service import build_workspace_queue_payload
+
+    # D = 5 qua 4 ngày liên tiếp: quota_tenths = 5, 10, 5, 10 -> exploration = 0, 1, 0, 1
+    db_path = tmp_path / "carry.db"
+    _seed_workspace_db(db_path, count=15, urgent_count=0, days_ago_t0=1)
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path))
+    monkeypatch.setenv("DAILY_CAPACITY_K", "5")
+    monkeypatch.delenv("EXPLORATION_SEED", raising=False)
+
+    # Cập nhật extraction_time đủ mới cho cả 4 ngày test
+    base_day = datetime(2026, 11, 10, 9, 0, 0, tzinfo=VN_TZ)
+    explore_counts = []
+    carry_outs = []
+
+    for d_idx in range(4):
+        day_now = base_day + timedelta(days=d_idx)
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                conn.execute(
+                    "UPDATE clean_enquiries SET extraction_time = ?, t0_time = ?",
+                    (
+                        (day_now - timedelta(hours=1)).isoformat(),
+                        (day_now - timedelta(hours=5)).isoformat(),
+                    ),
+                )
+                conn.commit()
+        p1 = build_workspace_queue_payload(view="active", capacity_k=5, now=day_now)
+        p2 = build_workspace_queue_payload(view="active", capacity_k=5, now=day_now)
+        # Idempotent trong cùng ngày: trả lại đúng seed & danh sách đã chốt
+        assert p1["exploration_seed"] == p2["exploration_seed"]
+        assert [x["enquiry_id"] for x in p1["items"]] == [x["enquiry_id"] for x in p2["items"]]
+        assert p1["status"] == "OK"
+        explore_counts.append(p1["exploration_slots_allocated"])
+        carry_outs.append(p1["carry_out_tenths"])
+
+    assert explore_counts == [0, 1, 0, 1]
+    assert carry_outs == [5, 0, 5, 0]

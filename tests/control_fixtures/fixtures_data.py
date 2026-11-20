@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import contextlib
 import sqlite3
 from typing import Any
 
@@ -50,5 +51,6 @@ def make_cf_row(**overrides: Any) -> dict[str, Any]:
 def create_clean_db(db_path: Path, rows: list[dict[str, Any]]) -> None:
     """Khởi tạo SQLite clean_enquiries cô lập từ danh sách bản ghi fixture."""
     df = pd.DataFrame(rows)
-    with sqlite3.connect(str(db_path)) as conn:
-        df.to_sql("clean_enquiries", conn, index=False, if_exists="replace")
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            df.to_sql("clean_enquiries", conn, index=False, if_exists="replace")

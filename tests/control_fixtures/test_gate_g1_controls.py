@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import contextlib
 import sqlite3
 import tempfile
 import time
@@ -49,7 +50,7 @@ VN_TZ = timezone(timedelta(hours=7))
 
 
 def run_single_control_fixture(fixture_id: str) -> None:
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         tmp = Path(td)
         old_db = os.environ.get("DATABASE_PATH")
         old_q = os.environ.get("QUARANTINE_DIR")
@@ -113,9 +114,10 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
     elif fid == "CF-06":
         db_path = tmp / "cf06.db"
         _create_clean_db(db_path, [_make_row()])
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute("CREATE TABLE outcome_events (enquiry_id TEXT, label TEXT)")
-            conn.commit()
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                conn.execute("CREATE TABLE outcome_events (enquiry_id TEXT, label TEXT)")
+                conn.commit()
         feat_df, cols = build_pre_t0_features(pd.DataFrame([_make_row()]), strict_leakage=True)
         prep = TabularPreprocessor(cols).fit(feat_df)
         model = RegularizedLogisticRegressionModel().fit(prep.transform(feat_df), np.array([1.0]))
@@ -164,8 +166,9 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
             csv_validator.DB_PATH = db_path
             csv_validator.validate_and_load()
             csv_validator.validate_and_load()
-            with sqlite3.connect(str(db_path)) as conn:
-                assert conn.execute("SELECT COUNT(*) FROM raw_enquiries").fetchone()[0] == 1
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                with conn:
+                    assert conn.execute("SELECT COUNT(*) FROM raw_enquiries").fetchone()[0] == 1
         finally:
             csv_validator.ENQUIRIES_PATH, csv_validator.OUTCOMES_PATH, csv_validator.QUARANTINE_PATH, csv_validator.QUARANTINE_OUTCOMES_PATH, csv_validator.DB_PATH = orig
     elif fid == "CF-11":
@@ -182,8 +185,9 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
             # Late older increment
             pd.DataFrame([_make_row(extraction_time="2026-10-01T10:00:00+07:00", workflow_state="New")]).to_csv(enq_csv, index=False)
             csv_validator.validate_and_load()
-            with sqlite3.connect(str(db_path)) as conn:
-                assert conn.execute("SELECT workflow_state FROM raw_enquiries").fetchone()[0] == "Closed"
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                with conn:
+                    assert conn.execute("SELECT workflow_state FROM raw_enquiries").fetchone()[0] == "Closed"
         finally:
             csv_validator.ENQUIRIES_PATH, csv_validator.OUTCOMES_PATH, csv_validator.QUARANTINE_PATH, csv_validator.QUARANTINE_OUTCOMES_PATH, csv_validator.DB_PATH = orig
     elif fid == "CF-12":
@@ -356,15 +360,17 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
     elif fid == "CF-29":
         db_path = tmp / "cf29.db"
         _create_clean_db(db_path, [_make_row()])
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute("CREATE TABLE raw_outcomes (enquiry_id TEXT PRIMARY KEY, label TEXT)")
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                conn.execute("CREATE TABLE raw_outcomes (enquiry_id TEXT PRIMARY KEY, label TEXT)")
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
         assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": ""}, headers={"X-User-Role": "SALES_READER"}).status_code == 400
         assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": "Ly do hop le"}, headers={"X-User-Role": "SALES_READER"}).status_code == 200
-        with sqlite3.connect(str(db_path)) as conn:
-            assert conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0] == 0
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                assert conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0] == 0
     elif fid == "CF-30":
         # Chỉ ghi cục bộ, không có side-effect gửi mail/SMS/CRM
         db_path = tmp / "cf30.db"
@@ -422,18 +428,20 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
         assert c.post("/api/block", json={"enquiry_id": "RESTORE-1", "reason": "Khach khiếu nại"}, headers={"X-User-Role": "SUPERVISOR"}).status_code == 200
-        with sqlite3.connect(str(db_path)) as conn:
-            block_registry = conn.execute("SELECT enquiry_id, account_key, reason, blocked_at, created_by FROM blocked_accounts").fetchall()
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                block_registry = conn.execute("SELECT enquiry_id, account_key, reason, blocked_at, created_by FROM blocked_accounts").fetchall()
 
         # Restore backup DB (chưa có lệnh chặn) và replay block_registry
         shutil.copy2(backup_db, db_path)
-        with sqlite3.connect(str(db_path)) as conn:
-            ensure_operational_tables(conn)
-            conn.executemany(
-                "INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by) VALUES (?, ?, ?, ?, ?)",
-                block_registry,
-            )
-            conn.commit()
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                ensure_operational_tables(conn)
+                conn.executemany(
+                    "INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by) VALUES (?, ?, ?, ?, ?)",
+                    block_registry,
+                )
+                conn.commit()
         q_after = c.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
         assert q_after["total"] == 0
     elif fid == "CF-37":
@@ -441,9 +449,10 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         txt = "Động cơ không đồng bộ 3 pha 75kW"
         db_path = tmp / "cf37.db"
         _create_clean_db(db_path, [_make_row(industry_at_t0=txt)])
-        with sqlite3.connect(str(db_path)) as conn:
-            val = conn.execute("SELECT industry_at_t0 FROM clean_enquiries").fetchone()[0]
-            assert val == txt
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                val = conn.execute("SELECT industry_at_t0 FROM clean_enquiries").fetchone()[0]
+                assert val == txt
     elif fid == "CF-38":
         db_path = tmp / "cf38.db"
         _create_clean_db(db_path, [

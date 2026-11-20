@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import contextlib
 import sqlite3
 
 from fastapi.testclient import TestClient
@@ -16,54 +17,55 @@ def _seed_workspace_db(db_path: Path, count: int = 30, urgent_count: int = 2, da
     ext_iso = (now - timedelta(hours=1)).replace(microsecond=0).isoformat()
     t0_iso = (now - timedelta(days=days_ago_t0)).replace(microsecond=0).isoformat()
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE clean_enquiries (
-                enquiry_id TEXT PRIMARY KEY,
-                account_key TEXT NOT NULL,
-                t0_time TEXT NOT NULL,
-                extraction_time TEXT NOT NULL,
-                product_family TEXT NOT NULL,
-                project_ref_code TEXT,
-                spec_completeness TEXT,
-                is_urgent_replacement TEXT,
-                contract_due_date TEXT,
-                workflow_state TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE raw_outcomes (
-                enquiry_id TEXT PRIMARY KEY,
-                label TEXT
-            )
-            """
-        )
-        rows = []
-        for i in range(1, count + 1):
-            is_urg = "Urgent" if i <= urgent_count else "Normal"
-            prod = "Motor_DongCo" if i % 2 == 1 else "Drive_BienTan"
-            rows.append(
-                (
-                    f"SN-{i:04d}",
-                    f"ACCT-{i:04d}",
-                    t0_iso,
-                    ext_iso,
-                    prod,
-                    f"PRJ-{i:04d}",
-                    "Full" if i % 3 != 0 else "Minimal",
-                    is_urg,
-                    (now + timedelta(days=15)).date().isoformat(),
-                    "New",
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE clean_enquiries (
+                    enquiry_id TEXT PRIMARY KEY,
+                    account_key TEXT NOT NULL,
+                    t0_time TEXT NOT NULL,
+                    extraction_time TEXT NOT NULL,
+                    product_family TEXT NOT NULL,
+                    project_ref_code TEXT,
+                    spec_completeness TEXT,
+                    is_urgent_replacement TEXT,
+                    contract_due_date TEXT,
+                    workflow_state TEXT
                 )
+                """
             )
-        conn.executemany(
-            "INSERT INTO clean_enquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rows,
-        )
-        conn.commit()
+            conn.execute(
+                """
+                CREATE TABLE raw_outcomes (
+                    enquiry_id TEXT PRIMARY KEY,
+                    label TEXT
+                )
+                """
+            )
+            rows = []
+            for i in range(1, count + 1):
+                is_urg = "Urgent" if i <= urgent_count else "Normal"
+                prod = "Motor_DongCo" if i % 2 == 1 else "Drive_BienTan"
+                rows.append(
+                    (
+                        f"SN-{i:04d}",
+                        f"ACCT-{i:04d}",
+                        t0_iso,
+                        ext_iso,
+                        prod,
+                        f"PRJ-{i:04d}",
+                        "Full" if i % 3 != 0 else "Minimal",
+                        is_urg,
+                        (now + timedelta(days=15)).date().isoformat(),
+                        "New",
+                    )
+                )
+            conn.executemany(
+                "INSERT INTO clean_enquiries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            conn.commit()
 
 
 def test_workspace_k_allocation_and_10pct_exploration(tmp_path: Path, monkeypatch):
@@ -192,10 +194,11 @@ def test_workspace_override_and_review_isolation(tmp_path: Path, monkeypatch):
     )
     assert ok_rev.status_code == 200
 
-    with sqlite3.connect(str(db_path)) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM staff_override_logs").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM staff_review_logs").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0] == 0
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            assert conn.execute("SELECT COUNT(*) FROM staff_override_logs").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM staff_review_logs").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0] == 0
 
 
 def test_serving_mode_locked_to_fallback_until_gate_g1(tmp_path: Path, monkeypatch):
@@ -388,10 +391,11 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     unsc_res = client.get("/api/v1/workspace/queue?view=unscored", headers={"X-User-Role": "SALES_READER"}).json()
     assert unsc_res["is_overloaded"] is True
 
-    with sqlite3.connect(str(db_stale)) as conn:
-        stale_ext = (datetime.now(VN_TZ) - timedelta(hours=30)).replace(microsecond=0).isoformat()
-        conn.execute("UPDATE clean_enquiries SET extraction_time = ?", (stale_ext,))
-        conn.commit()
+    with contextlib.closing(sqlite3.connect(str(db_stale))) as conn:
+        with conn:
+            stale_ext = (datetime.now(VN_TZ) - timedelta(hours=30)).replace(microsecond=0).isoformat()
+            conn.execute("UPDATE clean_enquiries SET extraction_time = ?", (stale_ext,))
+            conn.commit()
     assert client.post(
         "/api/v1/workspace/review",
         json={"enquiry_id": "SN-0001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True},

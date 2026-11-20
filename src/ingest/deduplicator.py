@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import contextlib
 import sqlite3
 from typing import Any
 
@@ -408,43 +409,44 @@ def deduplicate_enquiries(db_path: str | Path | None = None) -> dict[str, Any]:
     """
     target_db = str(db_path or _default_db_path())
 
-    with sqlite3.connect(target_db) as conn:
-        init_dedup_tables(conn)
-        raw_df = pd.read_sql_query("SELECT * FROM raw_enquiries", conn)
-        clean_df, merge_logs_df, steward_df = deduplicate_dataframe_with_steward(raw_df)
+    with contextlib.closing(sqlite3.connect(target_db)) as conn:
+        with conn:
+            init_dedup_tables(conn)
+            raw_df = pd.read_sql_query("SELECT * FROM raw_enquiries", conn)
+            clean_df, merge_logs_df, steward_df = deduplicate_dataframe_with_steward(raw_df)
 
-        table_cols = [
-            row[1] for row in conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
-        ]
-        for col in table_cols:
-            if col not in clean_df.columns:
-                clean_df[col] = None
-        clean_insert_df = clean_df[table_cols]
+            table_cols = [
+                row[1] for row in conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
+            ]
+            for col in table_cols:
+                if col not in clean_df.columns:
+                    clean_df[col] = None
+            clean_insert_df = clean_df[table_cols]
 
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute("DELETE FROM clean_enquiries")
-        if not clean_insert_df.empty:
-            clean_insert_df.to_sql("clean_enquiries", conn, if_exists="append", index=False)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM clean_enquiries")
+            if not clean_insert_df.empty:
+                clean_insert_df.to_sql("clean_enquiries", conn, if_exists="append", index=False)
 
-        conn.execute("DELETE FROM merge_audit_log")
-        if not merge_logs_df.empty:
-            merge_logs_df.to_sql("merge_audit_log", conn, if_exists="append", index=False)
+            conn.execute("DELETE FROM merge_audit_log")
+            if not merge_logs_df.empty:
+                merge_logs_df.to_sql("merge_audit_log", conn, if_exists="append", index=False)
 
-        conn.execute("DELETE FROM steward_review_queue")
-        if not steward_df.empty:
-            steward_df.to_sql("steward_review_queue", conn, if_exists="append", index=False)
-        conn.commit()
+            conn.execute("DELETE FROM steward_review_queue")
+            if not steward_df.empty:
+                steward_df.to_sql("steward_review_queue", conn, if_exists="append", index=False)
+            conn.commit()
 
-        clean_count = int(len(clean_df))
-        raw_count = int(len(raw_df))
-        dup_count = int(len(merge_logs_df))
-        steward_count = int(len(steward_df))
-        audit_count = int(
-            conn.execute("SELECT COUNT(*) FROM merge_audit_log").fetchone()[0]
-        )
-        logs_count = int(
-            conn.execute("SELECT COUNT(*) FROM merge_logs").fetchone()[0]
-        )
+            clean_count = int(len(clean_df))
+            raw_count = int(len(raw_df))
+            dup_count = int(len(merge_logs_df))
+            steward_count = int(len(steward_df))
+            audit_count = int(
+                conn.execute("SELECT COUNT(*) FROM merge_audit_log").fetchone()[0]
+            )
+            logs_count = int(
+                conn.execute("SELECT COUNT(*) FROM merge_logs").fetchone()[0]
+            )
 
     return {
         "status": "SUCCESS",

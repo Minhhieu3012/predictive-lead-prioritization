@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import contextlib
 import sqlite3
 
 from fastapi.testclient import TestClient
@@ -12,85 +13,86 @@ VN_TZ = timezone(timedelta(hours=7))
 
 
 def _create_test_db(db_path: Path, extraction_time: str) -> None:
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE clean_enquiries (
-                enquiry_id TEXT PRIMARY KEY,
-                account_key TEXT NOT NULL,
-                t0_time TEXT NOT NULL,
-                extraction_time TEXT,
-                product_family TEXT NOT NULL,
-                spec_completeness TEXT,
-                is_urgent_replacement TEXT,
-                contract_due_date TEXT,
-                workflow_state TEXT,
-                enquiry_channel_at_t0 TEXT,
-                account_age_days_at_t0 INTEGER,
-                prior_purchase_count_at_t0 INTEGER,
-                estimated_value_band_at_t0 TEXT
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE clean_enquiries (
+                    enquiry_id TEXT PRIMARY KEY,
+                    account_key TEXT NOT NULL,
+                    t0_time TEXT NOT NULL,
+                    extraction_time TEXT,
+                    product_family TEXT NOT NULL,
+                    spec_completeness TEXT,
+                    is_urgent_replacement TEXT,
+                    contract_due_date TEXT,
+                    workflow_state TEXT,
+                    enquiry_channel_at_t0 TEXT,
+                    account_age_days_at_t0 INTEGER,
+                    prior_purchase_count_at_t0 INTEGER,
+                    estimated_value_band_at_t0 TEXT
+                )
+                """
             )
-            """
-        )
-        rows = [
-            (
-                "SN-0001",
-                "ACCT-0001",
-                "2026-11-10T08:00:00+07:00",
-                extraction_time,
-                "Motor_DongCo",
-                "Full",
-                "Urgent",
-                "2026-11-15",
-                "New",
-                "Direct_Sales",
-                400,
-                5,
-                "High",
-            ),
-            (
-                "SN-0002",
-                "ACCT-0002",
-                "2026-11-10T09:00:00+07:00",
-                extraction_time,
-                "Drive_BienTan",
-                "Full",
-                "Normal",
-                "2026-12-20",
-                "New",
-                "Email",
-                120,
-                2,
-                "Medium",
-            ),
-            (
-                "SN-0003",
-                "ACCT-0003",
-                "2026-11-10T10:00:00+07:00",
-                extraction_time,
-                "Transmission_HopSo",
-                "Partial",
-                "Normal",
-                "2026-12-25",
-                "New",
-                "Website",
-                30,
-                0,
-                "Low",
-            ),
-        ]
-        conn.executemany(
-            """
-            INSERT INTO clean_enquiries (
-                enquiry_id, account_key, t0_time, extraction_time, product_family,
-                spec_completeness, is_urgent_replacement, contract_due_date,
-                workflow_state, enquiry_channel_at_t0, account_age_days_at_t0,
-                prior_purchase_count_at_t0, estimated_value_band_at_t0
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
-        conn.commit()
+            rows = [
+                (
+                    "SN-0001",
+                    "ACCT-0001",
+                    "2026-11-10T08:00:00+07:00",
+                    extraction_time,
+                    "Motor_DongCo",
+                    "Full",
+                    "Urgent",
+                    "2026-11-15",
+                    "New",
+                    "Direct_Sales",
+                    400,
+                    5,
+                    "High",
+                ),
+                (
+                    "SN-0002",
+                    "ACCT-0002",
+                    "2026-11-10T09:00:00+07:00",
+                    extraction_time,
+                    "Drive_BienTan",
+                    "Full",
+                    "Normal",
+                    "2026-12-20",
+                    "New",
+                    "Email",
+                    120,
+                    2,
+                    "Medium",
+                ),
+                (
+                    "SN-0003",
+                    "ACCT-0003",
+                    "2026-11-10T10:00:00+07:00",
+                    extraction_time,
+                    "Transmission_HopSo",
+                    "Partial",
+                    "Normal",
+                    "2026-12-25",
+                    "New",
+                    "Website",
+                    30,
+                    0,
+                    "Low",
+                ),
+            ]
+            conn.executemany(
+                """
+                INSERT INTO clean_enquiries (
+                    enquiry_id, account_key, t0_time, extraction_time, product_family,
+                    spec_completeness, is_urgent_replacement, contract_due_date,
+                    workflow_state, enquiry_channel_at_t0, account_age_days_at_t0,
+                    prior_purchase_count_at_t0, estimated_value_band_at_t0
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
 
 
 def test_emergency_block_removes_record_and_reindexes_rank(tmp_path, monkeypatch):
@@ -166,9 +168,10 @@ def test_empty_non_closed_queue_holds_stale_data(tmp_path, monkeypatch):
     db_path = tmp_path / "test_empty.db"
     fresh_ext = (datetime.now(VN_TZ) - timedelta(hours=1)).replace(microsecond=0).isoformat()
     _create_test_db(db_path, fresh_ext)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("UPDATE clean_enquiries SET workflow_state = 'Closed'")
-        conn.commit()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute("UPDATE clean_enquiries SET workflow_state = 'Closed'")
+            conn.commit()
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)
@@ -187,10 +190,11 @@ def test_missing_or_invalid_extraction_time_holds_stale_data(tmp_path, monkeypat
     db_path = tmp_path / "test_invalid_ext.db"
     fresh_ext = (datetime.now(VN_TZ) - timedelta(hours=1)).replace(microsecond=0).isoformat()
     _create_test_db(db_path, fresh_ext)
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("UPDATE clean_enquiries SET extraction_time = NULL WHERE enquiry_id = 'SN-0001'")
-        conn.execute("UPDATE clean_enquiries SET extraction_time = 'invalid-date' WHERE enquiry_id = 'SN-0002'")
-        conn.commit()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute("UPDATE clean_enquiries SET extraction_time = NULL WHERE enquiry_id = 'SN-0001'")
+            conn.execute("UPDATE clean_enquiries SET extraction_time = 'invalid-date' WHERE enquiry_id = 'SN-0002'")
+            conn.commit()
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)

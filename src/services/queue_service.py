@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import random
+import contextlib
 import sqlite3
 from typing import Any
 import unicodedata
@@ -193,94 +194,95 @@ def load_enquiries_and_meta() -> tuple[
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        has_clean = cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='clean_enquiries'"
-        ).fetchone()
-        has_raw = cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='raw_enquiries'"
-        ).fetchone()
+            has_clean = cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='clean_enquiries'"
+            ).fetchone()
+            has_raw = cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='raw_enquiries'"
+            ).fetchone()
 
-        table_name = "clean_enquiries" if has_clean else ("raw_enquiries" if has_raw else None)
-        if table_name is None:
-            return [], set(), set(), None, set(), set(), 0
+            table_name = "clean_enquiries" if has_clean else ("raw_enquiries" if has_raw else None)
+            if table_name is None:
+                return [], set(), set(), None, set(), set(), 0
 
-        cursor.execute(
-            f"SELECT * FROM {table_name} "
-            f"WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')"
-        )
-        enquiries = [dict(row) for row in cursor.fetchall()]
-
-        blocked_enquiries: set[str] = set()
-        blocked_accounts: set[str] = set()
-        if cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='blocked_accounts'"
-        ).fetchone():
-            for row in cursor.execute("SELECT * FROM blocked_accounts").fetchall():
-                row_dict = dict(row)
-                enq_val = str(row_dict.get("enquiry_id") or "").strip()
-                acct_val = str(row_dict.get("account_key") or "").strip()
-                if enq_val:
-                    blocked_enquiries.add(enq_val)
-                elif acct_val:
-                    blocked_accounts.add(acct_val)
-
-        reviewed_enquiries: set[str] = set()
-        if cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='staff_review_logs'"
-        ).fetchone():
-            for row in cursor.execute(
-                "SELECT DISTINCT enquiry_id FROM staff_review_logs WHERE review_completed = 1"
-            ).fetchall():
-                reviewed_enquiries.add(str(row["enquiry_id"]).strip())
-
-        overridden_enquiries: set[str] = set()
-        if cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='staff_override_logs'"
-        ).fetchone():
-            for row in cursor.execute("SELECT DISTINCT enquiry_id FROM staff_override_logs").fetchall():
-                overridden_enquiries.add(str(row["enquiry_id"]).strip())
-
-        steward_count = 0
-        if cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='steward_review_queue'"
-        ).fetchone():
-            steward_count = int(
-                cursor.execute(
-                    "SELECT COUNT(*) FROM steward_review_queue WHERE status = 'DATA_STEWARD'"
-                ).fetchone()[0]
+            cursor.execute(
+                f"SELECT * FROM {table_name} "
+                f"WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')"
             )
+            enquiries = [dict(row) for row in cursor.fetchall()]
 
-        has_unverified_extraction = False
-        latest_ext = None
-        for row in enquiries:
-            ext_dt = _parse_datetime(row.get("extraction_time"))
-            if ext_dt is None:
-                has_unverified_extraction = True
-                break
-            if ext_dt.tzinfo is None:
-                ext_dt = ext_dt.replace(tzinfo=VN_TZ)
-            if latest_ext is None or ext_dt > latest_ext:
-                latest_ext = ext_dt
+            blocked_enquiries: set[str] = set()
+            blocked_accounts: set[str] = set()
+            if cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='blocked_accounts'"
+            ).fetchone():
+                for row in cursor.execute("SELECT * FROM blocked_accounts").fetchall():
+                    row_dict = dict(row)
+                    enq_val = str(row_dict.get("enquiry_id") or "").strip()
+                    acct_val = str(row_dict.get("account_key") or "").strip()
+                    if enq_val:
+                        blocked_enquiries.add(enq_val)
+                    elif acct_val:
+                        blocked_accounts.add(acct_val)
 
-        if not enquiries or has_unverified_extraction or latest_ext is None:
-            age_hours: float | None = None
-        else:
-            now_vn = datetime.now(VN_TZ)
-            age_hours = max(0.0, round((now_vn - latest_ext).total_seconds() / 3600.0, 2))
+            reviewed_enquiries: set[str] = set()
+            if cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='staff_review_logs'"
+            ).fetchone():
+                for row in cursor.execute(
+                    "SELECT DISTINCT enquiry_id FROM staff_review_logs WHERE review_completed = 1"
+                ).fetchall():
+                    reviewed_enquiries.add(str(row["enquiry_id"]).strip())
 
-        return (
-            enquiries,
-            blocked_enquiries,
-            blocked_accounts,
-            age_hours,
-            reviewed_enquiries,
-            overridden_enquiries,
-            steward_count,
-        )
+            overridden_enquiries: set[str] = set()
+            if cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='staff_override_logs'"
+            ).fetchone():
+                for row in cursor.execute("SELECT DISTINCT enquiry_id FROM staff_override_logs").fetchall():
+                    overridden_enquiries.add(str(row["enquiry_id"]).strip())
+
+            steward_count = 0
+            if cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='steward_review_queue'"
+            ).fetchone():
+                steward_count = int(
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM steward_review_queue WHERE status = 'DATA_STEWARD'"
+                    ).fetchone()[0]
+                )
+
+            has_unverified_extraction = False
+            latest_ext = None
+            for row in enquiries:
+                ext_dt = _parse_datetime(row.get("extraction_time"))
+                if ext_dt is None:
+                    has_unverified_extraction = True
+                    break
+                if ext_dt.tzinfo is None:
+                    ext_dt = ext_dt.replace(tzinfo=VN_TZ)
+                if latest_ext is None or ext_dt > latest_ext:
+                    latest_ext = ext_dt
+
+            if not enquiries or has_unverified_extraction or latest_ext is None:
+                age_hours: float | None = None
+            else:
+                now_vn = datetime.now(VN_TZ)
+                age_hours = max(0.0, round((now_vn - latest_ext).total_seconds() / 3600.0, 2))
+
+            return (
+                enquiries,
+                blocked_enquiries,
+                blocked_accounts,
+                age_hours,
+                reviewed_enquiries,
+                overridden_enquiries,
+                steward_count,
+            )
 
 
 def _format_sla_due_timestamp(raw_due: Any) -> str | None:
@@ -758,27 +760,28 @@ def record_workspace_review(payload: dict[str, Any], user_id: str) -> dict[str, 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
 
     db_path = get_db_path()
-    with sqlite3.connect(str(db_path)) as conn:
-        ensure_operational_tables(conn)
-        conn.execute(
-            """
-            INSERT INTO staff_review_logs (
-                enquiry_id, decision_type, contact_permission_verified,
-                contact_attempted, review_completed, next_step_note, reviewed_by, reviewed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                enquiry_id,
-                decision_type,
-                1 if contact_permission_verified else 0,
-                1 if contact_attempted else 0,
-                1 if review_completed else 0,
-                next_step_note,
-                user_id,
-                now_iso,
-            ),
-        )
-        conn.commit()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_operational_tables(conn)
+            conn.execute(
+                """
+                INSERT INTO staff_review_logs (
+                    enquiry_id, decision_type, contact_permission_verified,
+                    contact_attempted, review_completed, next_step_note, reviewed_by, reviewed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    enquiry_id,
+                    decision_type,
+                    1 if contact_permission_verified else 0,
+                    1 if contact_attempted else 0,
+                    1 if review_completed else 0,
+                    next_step_note,
+                    user_id,
+                    now_iso,
+                ),
+            )
+            conn.commit()
 
     return {
         "status": "recorded",
@@ -810,17 +813,18 @@ def record_workspace_override(payload: dict[str, Any], user_id: str) -> dict[str
 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
     db_path = get_db_path()
-    with sqlite3.connect(str(db_path)) as conn:
-        ensure_operational_tables(conn)
-        conn.execute(
-            """
-            INSERT INTO staff_override_logs (
-                enquiry_id, override_reason_code, justification, overridden_by, overridden_at
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (enquiry_id, reason_code, justification, user_id, now_iso),
-        )
-        conn.commit()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_operational_tables(conn)
+            conn.execute(
+                """
+                INSERT INTO staff_override_logs (
+                    enquiry_id, override_reason_code, justification, overridden_by, overridden_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (enquiry_id, reason_code, justification, user_id, now_iso),
+            )
+            conn.commit()
 
     return {
         "status": "overridden",

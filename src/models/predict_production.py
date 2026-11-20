@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import contextlib
 import sqlite3
 from typing import Any
 
@@ -34,11 +35,12 @@ def score_production_batch(
         raise FileNotFoundError(f"Manifest not found: {m_path}")
     manifest = json.loads(m_path.read_text(encoding="utf-8"))
 
-    with sqlite3.connect(str(db_path)) as conn:
-        df = pd.read_sql_query(
-            "SELECT * FROM clean_enquiries WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')",
-            conn,
-        )
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM clean_enquiries WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')",
+                conn,
+            )
 
     if df.empty:
         return pd.DataFrame(columns=["enquiry_id", "model_score", "model_version", "scoring_mode"])

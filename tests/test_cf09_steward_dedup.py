@@ -1,6 +1,7 @@
 """Tests cho CF-09: Uncertain duplicate routing to steward_review_queue (DATA_STEWARD)."""
 
 from pathlib import Path
+import contextlib
 import sqlite3
 
 import pandas as pd
@@ -52,18 +53,20 @@ def test_cf09_missing_project_ref_on_one_side_routes_to_steward(tmp_path: Path):
         _base_row(enquiry_id="SN-1", project_ref_code="PRJ-1"),
         _base_row(enquiry_id="SN-2", project_ref_code="", enquiry_channel_at_t0="DIRECT_EMAIL"),
     ])
-    with sqlite3.connect(str(db_path)) as conn:
-        df.to_sql("raw_enquiries", conn, index=False)
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            df.to_sql("raw_enquiries", conn, index=False)
 
     summary = deduplicate_enquiries(db_path=db_path)
     assert summary["clean_count"] == 2
     assert summary["duplicates_count"] == 0
     assert summary["steward_review_count"] == 1
 
-    with sqlite3.connect(str(db_path)) as conn:
-        rows = conn.execute("SELECT enquiry_id_a, enquiry_id_b, status FROM steward_review_queue").fetchall()
-        assert len(rows) == 1
-        assert rows[0][2] == "DATA_STEWARD"
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            rows = conn.execute("SELECT enquiry_id_a, enquiry_id_b, status FROM steward_review_queue").fetchall()
+            assert len(rows) == 1
+            assert rows[0][2] == "DATA_STEWARD"
 
 
 def test_cf09_conflicting_urgency_or_spec_routes_to_steward():

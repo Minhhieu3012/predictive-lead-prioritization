@@ -1,6 +1,7 @@
 """PLPT-16, PLPT-17, PLPT-24 & PLPT-25: FastAPI Queue, Block, Workspace & RBAC API."""
 
 from datetime import datetime
+import contextlib
 import sqlite3
 from typing import Any
 
@@ -126,46 +127,47 @@ def block_lead_or_account(
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
 
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-            ensure_operational_tables(conn)
-            if target_enq is not None:
-                existing = conn.execute(
-                    """
-                    SELECT enquiry_id, account_key, reason, blocked_at
-                    FROM blocked_accounts
-                    WHERE enquiry_id = ?
-                    LIMIT 1
-                    """,
-                    (target_enq,),
-                ).fetchone()
-            else:
-                existing = conn.execute(
-                    """
-                    SELECT enquiry_id, account_key, reason, blocked_at
-                    FROM blocked_accounts
-                    WHERE COALESCE(enquiry_id, '') = '' AND account_key = ?
-                    LIMIT 1
-                    """,
-                    (target_acct,),
-                ).fetchone()
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                ensure_operational_tables(conn)
+                if target_enq is not None:
+                    existing = conn.execute(
+                        """
+                        SELECT enquiry_id, account_key, reason, blocked_at
+                        FROM blocked_accounts
+                        WHERE enquiry_id = ?
+                        LIMIT 1
+                        """,
+                        (target_enq,),
+                    ).fetchone()
+                else:
+                    existing = conn.execute(
+                        """
+                        SELECT enquiry_id, account_key, reason, blocked_at
+                        FROM blocked_accounts
+                        WHERE COALESCE(enquiry_id, '') = '' AND account_key = ?
+                        LIMIT 1
+                        """,
+                        (target_acct,),
+                    ).fetchone()
 
-            if existing is None:
-                conn.execute(
-                    """
-                    INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (target_enq, target_acct, reason, now_iso, created_by),
-                )
-                conn.commit()
-                blocked_at = now_iso
-                enquiry_id = target_enq or ""
-                account_key = target_acct or ""
-            else:
-                enquiry_id = existing[0] or ""
-                account_key = existing[1] or ""
-                reason = existing[2] or reason
-                blocked_at = existing[3] or now_iso
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (target_enq, target_acct, reason, now_iso, created_by),
+                    )
+                    conn.commit()
+                    blocked_at = now_iso
+                    enquiry_id = target_enq or ""
+                    account_key = target_acct or ""
+                else:
+                    enquiry_id = existing[0] or ""
+                    account_key = existing[1] or ""
+                    reason = existing[2] or reason
+                    blocked_at = existing[3] or now_iso
 
         return {
             "blocked": True,
@@ -264,7 +266,7 @@ def get_queue(
 
 @app.get("/api/v1/workspace/queue")
 def get_workspace_queue(
-    view: str = Query(default="active", regex="^(active|unscored|quarantine)$"),
+    view: str = Query(default="active", pattern="^(active|unscored|quarantine)$"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=1000),
     q: str | None = Query(default=None),

@@ -1,6 +1,7 @@
 """PLPT-27 / CF-14..CF-18: 60-Day Outcome Maturity Evaluation & Versioned Label Correction."""
 
 from datetime import datetime, timedelta, timezone
+import contextlib
 import sqlite3
 from typing import Any
 
@@ -83,37 +84,38 @@ def apply_versioned_label_correction(
     if norm_label not in {"POSITIVE", "NEGATIVE", "Unknown"}:
         raise ValueError(f"Invalid label: {new_label}")
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS outcome_label_revisions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                enquiry_id TEXT NOT NULL,
-                revision_number INTEGER NOT NULL,
-                label TEXT NOT NULL,
-                recorded_at TEXT NOT NULL,
-                correction_reason TEXT NOT NULL,
-                preserved_historical_score REAL,
-                created_at TEXT NOT NULL
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS outcome_label_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    enquiry_id TEXT NOT NULL,
+                    revision_number INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    correction_reason TEXT NOT NULL,
+                    preserved_historical_score REAL,
+                    created_at TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        prev_rev = conn.execute(
-            "SELECT COALESCE(MAX(revision_number), 0) FROM outcome_label_revisions WHERE enquiry_id = ?",
-            (enquiry_id,),
-        ).fetchone()[0]
-        next_rev = int(prev_rev) + 1
-        now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
-        conn.execute(
-            """
-            INSERT INTO outcome_label_revisions (
-                enquiry_id, revision_number, label, recorded_at,
-                correction_reason, preserved_historical_score, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (enquiry_id, next_rev, norm_label, recorded_at, correction_reason, prior_frozen_score, now_iso),
-        )
-        conn.commit()
+            prev_rev = conn.execute(
+                "SELECT COALESCE(MAX(revision_number), 0) FROM outcome_label_revisions WHERE enquiry_id = ?",
+                (enquiry_id,),
+            ).fetchone()[0]
+            next_rev = int(prev_rev) + 1
+            now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+            conn.execute(
+                """
+                INSERT INTO outcome_label_revisions (
+                    enquiry_id, revision_number, label, recorded_at,
+                    correction_reason, preserved_historical_score, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (enquiry_id, next_rev, norm_label, recorded_at, correction_reason, prior_frozen_score, now_iso),
+            )
+            conn.commit()
 
     return {
         "enquiry_id": enquiry_id,

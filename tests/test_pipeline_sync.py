@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import contextlib
 import sqlite3
 
 from fastapi.testclient import TestClient
@@ -93,10 +94,11 @@ def test_upsert_new_to_closed_and_block_older_snapshot(tmp_path, monkeypatch):
     }])
     csv_validator.validate_and_load()
 
-    with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT workflow_state, extraction_time, project_ref_code FROM raw_enquiries WHERE enquiry_id='SN-1001'"
-        ).fetchone()
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        with conn:
+            row = conn.execute(
+                "SELECT workflow_state, extraction_time, project_ref_code FROM raw_enquiries WHERE enquiry_id='SN-1001'"
+            ).fetchone()
     assert row == ("Closed", ext_new, "PRJ-01")
 
     deduplicator.deduplicate_enquiries(db_path)
@@ -292,13 +294,14 @@ def test_closed_does_not_swallow_new_open_and_60d_window(tmp_path, monkeypatch):
     assert stats["clean_count"] == 3
     assert stats["duplicates_count"] == 1
 
-    with sqlite3.connect(db_path) as conn:
-        pk_info = conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
-        assert any(col[1] == "enquiry_id" and col[5] == 1 for col in pk_info)
-        ext_merged = conn.execute(
-            "SELECT extraction_time FROM clean_enquiries WHERE enquiry_id='SN-OPEN-DUP'"
-        ).fetchone()[0]
-        assert ext_merged == ext_new
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        with conn:
+            pk_info = conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()
+            assert any(col[1] == "enquiry_id" and col[5] == 1 for col in pk_info)
+            ext_merged = conn.execute(
+                "SELECT extraction_time FROM clean_enquiries WHERE enquiry_id='SN-OPEN-DUP'"
+            ).fetchone()[0]
+            assert ext_merged == ext_new
 
     client = TestClient(app)
     res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
@@ -397,8 +400,9 @@ def test_raw_outcomes_out_of_order_when_recorded_at_empty(tmp_path, monkeypatch)
     }])
     csv_validator.validate_and_load()
 
-    with sqlite3.connect(db_path) as conn:
-        lbl = conn.execute("SELECT label FROM raw_outcomes WHERE enquiry_id='SN-OUT-1'").fetchone()[0]
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        with conn:
+            lbl = conn.execute("SELECT label FROM raw_outcomes WHERE enquiry_id='SN-OUT-1'").fetchone()[0]
     assert lbl == "POSITIVE"
 
 

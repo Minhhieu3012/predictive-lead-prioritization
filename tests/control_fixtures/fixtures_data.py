@@ -771,8 +771,11 @@ class ControlFixtureFactory:
             "fixture_id": "CF-24",
             "measured_lift": 1.12,  # Nhỏ hơn ngưỡng tối thiểu 1.20x
             "minimum_lift_required": 1.20,
+            "ci_95_lower_bound": 0.95,
+            "ci_95_upper_bound": 1.45,
             "expected_serving_mode": "RULES_BASELINE",
             "expected_fallback_reason": "GATE_G1_MINIMUM_LIFT_NOT_MET",
+            "non_causal_warning_required": True,
         }
 
     # --------------------------------------------------------------------------
@@ -1187,7 +1190,11 @@ def execute_fixture_verification(fixture_id: str) -> dict[str, Any]:
 
     elif fid == "CF-24":
         lift = data["measured_lift"]
-        fallback = lift < data["minimum_lift_required"]
+        ci_lower = data["ci_95_lower_bound"]
+        fallback = (
+            lift < data["minimum_lift_required"]
+            or ci_lower <= 1.0
+        )
         mode = "RULES_BASELINE" if fallback else "PREDICTIVE_ML"
         passed = mode == data["expected_serving_mode"]
         details = f"Lift {lift:.2f} < 1.20x -> Reverted to {mode}."

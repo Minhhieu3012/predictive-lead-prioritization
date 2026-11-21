@@ -8,7 +8,13 @@ import os
 from pathlib import Path
 import secrets
 import sqlite3
+from collections.abc import Mapping
 from typing import Any
+
+from src.ml.gate_g1_decider import (
+    NON_CAUSAL_WARNING,
+    ensure_predictive_ml_allowed,
+)
 
 from src.rules.rules_engine import _parse_datetime, build_queue
 
@@ -120,6 +126,7 @@ def allocate_ranked_enquiries(
     capacity_k: int = DEFAULT_REVIEW_CAPACITY_K,
     seed: int,
     carry_in_tenths: int = 0,
+    gate_decision: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Allocate mandatory, ranked, and seeded-exploration slots."""
     if isinstance(capacity_k, bool) or not isinstance(capacity_k, int):
@@ -141,7 +148,22 @@ def allocate_ranked_enquiries(
         except (TypeError, ValueError) as error:
             raise ValueError("business_date must be an ISO date") from error
 
-    candidates = sorted(ranked_enquiries, key=_allocation_order)
+    gate_decision_payload = dict(gate_decision) if gate_decision is not None else None
+    predictive_ml_allowed = ensure_predictive_ml_allowed(gate_decision_payload)
+
+    protected_candidates: list[dict[str, Any]] = []
+    for ranked_item in ranked_enquiries:
+        item = dict(ranked_item)
+        if item.get("score_mode") == "PREDICTIVE_ML" and not predictive_ml_allowed:
+            item["score_mode"] = "RULES_BASELINE"
+            item["rules_label"] = "RULES_BASELINE"
+            item["gate_status"] = "FAIL"
+            item["gate_warning"] = NON_CAUSAL_WARNING
+        elif item.get("score_mode") == "PREDICTIVE_ML":
+            item["gate_status"] = "PASS"
+        protected_candidates.append(item)
+
+    candidates = sorted(protected_candidates, key=_allocation_order)
     candidate_ids = [str(item["enquiry_id"]) for item in candidates]
     if len(candidate_ids) != len(set(candidate_ids)):
         raise ValueError("Duplicate enquiry_id in allocation candidates")
@@ -166,6 +188,7 @@ def allocate_ranked_enquiries(
 
     if capacity_exceeded_by:
         return {
+            "gate_decision": gate_decision_payload,
             "business_date": business_date_text,
             "capacity_k": capacity_k,
             "mandatory_count": mandatory_count,
@@ -220,6 +243,7 @@ def allocate_ranked_enquiries(
     ]
 
     return {
+        "gate_decision": gate_decision_payload,
         "business_date": business_date_text,
         "capacity_k": capacity_k,
         "mandatory_count": mandatory_count,
@@ -380,6 +404,7 @@ def get_or_create_daily_allocation(
     business_date: date | str,
     capacity_k: int,
     seed: int | None = None,
+    gate_decision: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     business_date_text = (
         business_date.isoformat()
@@ -414,6 +439,7 @@ def get_or_create_daily_allocation(
                 capacity_k=capacity_k,
                 seed=actual_seed,
                 carry_in_tenths=carry_in_tenths,
+                gate_decision=gate_decision,
             )
             _insert_allocation(
                 conn,
@@ -439,6 +465,7 @@ def regenerate_daily_allocation(
     actor_id: str,
     reason: str,
     seed: int | None = None,
+    gate_decision: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     business_date_text = (
         business_date.isoformat()
@@ -471,6 +498,7 @@ def regenerate_daily_allocation(
                 capacity_k=capacity_k,
                 seed=actual_seed,
                 carry_in_tenths=int(existing["carry_in_tenths"]),
+                gate_decision=gate_decision,
             )
             _insert_allocation(
                 conn,

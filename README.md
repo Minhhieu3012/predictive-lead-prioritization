@@ -71,8 +71,24 @@ predictive-lead-prioritization/
 │       ├── backup_restore.py           # OPS-07: Sao lưu 35 ngày & khôi phục tái áp dụng lệnh chặn
 │       └── portable_exit.py            # OPS-08 / DEL-04: Xuất dữ liệu rời bỏ hệ thống định dạng trung lập
 ├── tests/
-│   ├── test_deduplicator.py
-│   └── test_rules_engine.py
+│   ├── core_pipeline/                  # Sprint 2: pipeline sync, dedup, rules engine, emergency block
+│   │   ├── test_pipeline_sync.py
+│   │   ├── test_deduplicator.py
+│   │   ├── test_rules_engine.py
+│   │   └── test_plpt17_blocking.py
+│   ├── workspace_pilot/                # Sprint 3–4 (PLPT-4 / PLPT-57): workspace, p95 <= 3.0s, pilot 20BD
+│   │   ├── test_sprint3_workspace.py
+│   │   └── test_plpt57_pilot_and_perf.py
+│   ├── ml_shadow/                      # Sprint 3–4 (PLPT-5 / PLPT-56): eval, 1.000/200 split, shadow & fallback
+│   │   ├── test_sprint3_ml_eval.py
+│   │   └── test_plpt56_shadow_and_fallback.py
+│   ├── security_ops/                   # Sprint 4–5 (PLPT-7, PLPT-8): RBAC 5 vai trò, sự cố 4h, drift & backup/exit
+│   │   ├── test_plpt55_rbac_and_incident.py
+│   │   └── test_plpt58_drift_and_ops.py
+│   └── control_fixtures/               # Cổng Gate G1 & kiểm thử hồi quy (40 Control Fixtures + CF-09)
+│       ├── fixtures_data.py
+│       ├── test_gate_g1_controls.py
+│       └── test_cf09_steward_dedup.py
 ├── .gitignore
 ├── .pre-commit-config.yaml
 └── README.md

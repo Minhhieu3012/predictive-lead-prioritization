@@ -11,11 +11,17 @@ Hệ thống hỗ trợ điều phối và xếp hạng ưu tiên yêu cầu bá
 
 ```text
 predictive-lead-prioritization/
-├── data/
-│   ├── raw/
-│   │   ├── enquiries_snapshot.csv      # 22 cột (UTF-8)
-│   │   └── outcome_events.csv          # 14 cột (UTF-8)
-│   ├── quarantine/                     # File lỗi sinh tự động (ignored by Git)
+├── artifacts/                          # Bằng chứng kiểm toán bất biến theo từng Cổng kiểm soát
+│   ├── gate_g1/                        # Báo cáo 40 Control Fixtures, benchmark & khóa single-use cohort
+│   ├── gate_g2/                        # Bằng chứng kiểm thử Shadow Scoring, RBAC & phê duyệt Gate G2
+│   ├── gate_g3/                        # Bằng chứng thí điểm 20 ngày làm việc & nghiệm thu Gate G3
+│   ├── models/
+│   │   └── plpt-logreg-v1.0.0/         # Manifest ứng viên ML (serving_mode_locked: RULES_BASELINE)
+│   └── reference/                      # Chuẩn đối chiếu drift hằng ngày (PLPT-58 / OPS-06)
+├── data/                               # Dữ liệu cục bộ/vận hành (chỉ commit .gitkeep; mọi CSV/DB bị .gitignore)
+│   ├── raw/                            # enquiries_snapshot.csv (22 cột) & outcome_events.csv (14 cột)
+│   ├── quarantine/                     # File lỗi tách riêng (quarantine_rows.csv, quarantine_outcomes.csv)
+│   ├── backups/                        # Bản sao lưu SQLite xoay vòng 35 ngày (Sprint 5 / OPS-07)
 │   └── songnhat.db                     # SQLite DB sinh tự động (ignored by Git)
 ├── docs/
 │   ├── README.md                       # Tổng mục lục phân tầng 4 nhóm tài liệu RFP

@@ -11,22 +11,25 @@ env/
 *.key
 secrets/
 
-# Dữ liệu khách hàng thật
-data/raw/
+# Dữ liệu vận hành & khách hàng thật (chỉ commit .gitkeep, tuyệt đối không đẩy DB/CSV/backup lên Git)
+data/raw/*
+!data/raw/.gitkeep
+data/quarantine/*
+!data/quarantine/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
 data/private/
+data/songnhat.db
+data/quarantine/quarantine_rows.csv
+data/quarantine/quarantine_outcomes.csv
 *.csv
 *.xlsx
+*.db
 
 # Python
 __pycache__/
 *.pyc
-.ipynb_checkpoints/
-
-.pytest_cache/
-*.db
-data/quarantine/
-# Auto-generated & local runtime files
 *.py[cod]
-data/songnhat.db
-data/quarantine/quarantine_rows.csv
+.ipynb_checkpoints/
+.pytest_cache/
 

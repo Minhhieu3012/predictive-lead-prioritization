@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 
 # ============================================================
@@ -6,7 +7,7 @@ import pandas as pd
 # Audit script SongNhat AI-02 trong data/raw/
 # ============================================================
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = str(Path(__file__).resolve().parents[2])
 ENQUIRY_FILE = os.path.join(BASE_DIR, "data", "raw", "enquiries_snapshot.csv")
 OUTCOME_FILE = os.path.join(BASE_DIR, "data", "raw", "outcome_events.csv")
 

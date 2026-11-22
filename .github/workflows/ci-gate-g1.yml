@@ -34,7 +34,7 @@ jobs:
 
       - name: Run 40 Control Fixtures JSON report generator (PLPT-48)
         run: |
-          python scripts/run_control_fixtures.py
+          python scripts/audit/run_control_fixtures.py
 
       - name: Validate Zero-Failure Gate Threshold (100% Passed)
         run: |
@@ -55,7 +55,7 @@ jobs:
 
       - name: Run US-03 data audit
         run: |
-          python scripts/us_03_check.py
+          python scripts/audit/us_03_check.py
 
       - name: Upload Gate G1 verification artifacts (always)
         if: always()

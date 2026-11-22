@@ -1,8 +1,16 @@
+"""[SYNTHETIC_ONLY] Sinh dữ liệu giả lập chuẩn 22 cột / 14 cột phục vụ kiểm thử pipeline SongNhat AI-02.
+
+CẢNH BÁO: Script này CHỈ dùng để tạo dữ liệu giả lập (SYNTHETIC) trong môi trường dev/test.
+Tuyệt đối KHÔNG dùng thay thế dữ liệu lịch sử thật của SongNhat cho quyết định Gate G1 hoặc Production.
+"""
+
 import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ORIGIN = "SYNTHETIC_ONLY"
 VN_TZ = timezone(timedelta(hours=7))
 RANDOM_SEED = 42
 
@@ -187,7 +195,7 @@ def main():
         enq_rows.append(e)
         out_rows.append(o)
 
-    raw_dir = Path("data/raw")
+    raw_dir = PROJECT_ROOT / "data" / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     enq_path = raw_dir / "enquiries_snapshot.csv"
@@ -196,8 +204,8 @@ def main():
     pd.DataFrame(enq_rows).to_csv(enq_path, index=False, encoding="utf-8")
     pd.DataFrame(out_rows).to_csv(out_path, index=False, encoding="utf-8")
 
-    print(f"Da tao {enq_path} ({len(enq_rows)} dong)")
-    print(f"Da tao {out_path} ({len(out_rows)} dong)")
+    print(f"[{DATA_ORIGIN}] Da tao {enq_path} ({len(enq_rows)} dong)")
+    print(f"[{DATA_ORIGIN}] Da tao {out_path} ({len(out_rows)} dong)")
 
 
 if __name__ == "__main__":

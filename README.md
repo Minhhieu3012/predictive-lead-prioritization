@@ -39,8 +39,12 @@ predictive-lead-prioritization/
 │   └── handover/                       # Gói bàn giao DEL 04 (Sprint 5: hướng dẫn 5 vai trò, vận hành, exit)
 │       └── README.md
 ├── scripts/
-│   ├── generate_songnhat_data.py       # Sinh dữ liệu mẫu chuẩn 22 cột / 14 cột
-│   └── us_03_check.py                  # Kiểm tra schema & dữ liệu quarantine
+│   ├── dev/                            # [SYNTHETIC_ONLY] Chỉ sinh dữ liệu giả lập kiểm thử, KHÔNG dùng cho dữ liệu thật
+│   │   └── generate_synthetic_data.py  # [SYNTHETIC_ONLY] Sinh dữ liệu mẫu chuẩn 22 cột / 14 cột
+│   └── audit/                          # Script kiểm toán dữ liệu & đánh giá cổng Gate G0/G1
+│       ├── us_03_check.py              # Kiểm toán schema, độ chín 60 ngày, chống rò rỉ & quarantine
+│       ├── run_control_fixtures.py     # Chạy 40 Control Fixtures -> artifacts/gate_g1/control_fixtures_report.json
+│       └── run_gate_g1_eval.py         # Đánh giá Temporal Benchmark, Paired Bootstrap & Gate G1
 ├── src/
 │   ├── api/
 │   │   └── main.py                     # FastAPI endpoint GET /api/queue & /api/v1/workspace/*
@@ -125,17 +129,21 @@ predictive-lead-prioritization/
 Mở PowerShell tại thư mục gốc dự án và sử dụng `py`:
 
 ```powershell
-# 1. Sinh dữ liệu mẫu chuẩn
-py scripts/generate_songnhat_data.py
+# 1. [SYNTHETIC_ONLY] Sinh dữ liệu giả lập để kiểm thử pipeline cục bộ (KHÔNG dùng cho dữ liệu thật)
+py scripts/dev/generate_synthetic_data.py
 
-# 2. Chạy pipeline nạp CSV và gộp trùng
+# 2. Chạy kiểm toán dữ liệu đầu vào (US-03) & 40 Control Fixtures
+py scripts/audit/us_03_check.py
+py scripts/audit/run_control_fixtures.py
+
+# 3. Chạy pipeline nạp CSV và gộp trùng
 py -m src.ingest.csv_validator
 py -m src.ingest.deduplicator
 
-# 3. Chạy toàn bộ unit test
+# 4. Chạy toàn bộ unit test
 py -m pytest
 
-# 4. Khởi động FastAPI server
+# 5. Khởi động FastAPI server
 py -m uvicorn src.api.main:app --reload
 ```
 

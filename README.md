@@ -18,11 +18,20 @@ predictive-lead-prioritization/
 │   ├── quarantine/                     # File lỗi sinh tự động (ignored by Git)
 │   └── songnhat.db                     # SQLite DB sinh tự động (ignored by Git)
 ├── docs/
-│   ├── us_01_dinh_nghia_thoi_gian_va_cong_suat.md
-│   ├── us_02_tieu_chi_rubric_va_trang_thai.md
-│   ├── us_03_cau_truc_2_file_csv.md
-│   ├── us_04_bao_mat_va_phap_ly_vietnam.md
-│   └── us_05_ho_so_quyet_dinh_go.md
+│   ├── README.md                       # Tổng mục lục phân tầng 4 nhóm tài liệu RFP
+│   ├── discovery/                      # Gói bàn giao DEL 01 (Sprint 1: us_01–us_05)
+│   │   ├── us_01_dinh_nghia_thoi_gian_va_cong_suat.md
+│   │   ├── us_02_tieu_chi_rubric_va_trang_thai.md
+│   │   ├── us_03_cau_truc_2_file_csv.md
+│   │   ├── us_04_bao_mat_va_phap_ly_vietnam.md
+│   │   └── us_05_ho_so_quyet_dinh_go.md
+│   ├── specs/                          # Đặc tả & quyết định kỹ thuật (Sprint 3–4)
+│   │   ├── PO-Decisions-Daily-Lead-Workspace.md
+│   │   └── ML-Pre-T0-Feature-Store-Decisions.md
+│   ├── governance/                     # Biên bản chốt cổng Gate G1–G3 & tuân thủ pháp lý VN
+│   │   └── README.md
+│   └── handover/                       # Gói bàn giao DEL 04 (Sprint 5: hướng dẫn 5 vai trò, vận hành, exit)
+│       └── README.md
 ├── scripts/
 │   ├── generate_songnhat_data.py       # Sinh dữ liệu mẫu chuẩn 22 cột / 14 cột
 │   └── us_03_check.py                  # Kiểm tra schema & dữ liệu quarantine

@@ -99,8 +99,10 @@ predictive-lead-prioritization/
 │       ├── fixtures_data.py
 │       ├── test_gate_g1_controls.py
 │       └── test_cf09_steward_dedup.py
-├── .gitignore
-├── .pre-commit-config.yaml
+├── .env.example                        # Mẫu biến môi trường (ENV_MODE, DATABASE_PATH, SESSION_SECRET_KEY, SESSION_TTL_MINUTES)
+├── .gitignore                          # Chặn tuyệt đối .env thật, DB SQLite, CSV dữ liệu thật & quarantine
+├── .pre-commit-config.yaml             # Hook gitleaks + chặn commit file .env thật
+├── requirements.txt
 └── README.md
 ```
 

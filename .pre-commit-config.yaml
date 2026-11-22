@@ -3,4 +3,11 @@ repos:
   rev: v8.30.0
   hooks:
   - id: gitleaks
+- repo: local
+  hooks:
+  - id: forbid-real-env-files
+    name: Block real .env files (allow only .env.example)
+    entry: 'python -c "import sys; raise SystemExit(''ERROR: Cam commit file .env that! Chi duoc commit .env.example. Files: '' + '', ''.join(sys.argv[1:]))"'
+    language: system
+    files: '(^|/)(\.env|\.env\.(?!example$).+)$'
 

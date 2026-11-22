@@ -2,11 +2,14 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 import secrets
 
 from fastapi import HTTPException
 
 VN_TZ = timezone(timedelta(hours=7))
+VALID_ENV_MODES = {"development", "evaluation", "production"}
+DEFAULT_PLACEHOLDER_SECRET = "CHANGE_ME_LOCAL_DEV_PLACEHOLDER_ONLY"
 MAX_CONCURRENT_SESSIONS = 5
 DEFAULT_SESSION_TTL_MINUTES = 480
 
@@ -17,6 +20,38 @@ VALID_ROLES = {
     "MODEL_REVIEWER",
     "ADMINISTRATOR",
 }
+
+
+def get_env_mode() -> str:
+    """SEC-06 / PLPT-55: Xác định môi trường vận hành (development | evaluation | production)."""
+    mode = os.getenv("ENV_MODE", "development").strip().lower()
+    if mode not in VALID_ENV_MODES:
+        raise ValueError(f"ENV_MODE không hợp lệ: {mode}. Chỉ chấp nhận {sorted(VALID_ENV_MODES)}.")
+    return mode
+
+
+def get_session_ttl_minutes() -> int:
+    raw = os.getenv("SESSION_TTL_MINUTES", str(DEFAULT_SESSION_TTL_MINUTES)).strip()
+    try:
+        val = int(raw)
+        return val if val > 0 else DEFAULT_SESSION_TTL_MINUTES
+    except ValueError:
+        return DEFAULT_SESSION_TTL_MINUTES
+
+
+def get_session_secret_key() -> str:
+    """
+    SEC-06 / PLPT-55: Đọc khóa bí mật phiên từ biến môi trường (tách khỏi tệp dữ liệu).
+    Ở ENV_MODE=production bắt buộc cung cấp khóa thật >= 32 ký tự và khác placeholder.
+    """
+    mode = get_env_mode()
+    secret = os.getenv("SESSION_SECRET_KEY", "").strip()
+    if mode == "production":
+        if not secret or secret == DEFAULT_PLACEHOLDER_SECRET or len(secret) < 32:
+            raise RuntimeError(
+                "ENV_MODE=production yêu cầu SESSION_SECRET_KEY thật (>= 32 ký tự, không dùng placeholder)."
+            )
+    return secret or DEFAULT_PLACEHOLDER_SECRET
 
 
 @dataclass(frozen=True)
@@ -62,9 +97,10 @@ class SessionStore:
         user_id: str,
         role: str,
         *,
-        ttl_minutes: int = DEFAULT_SESSION_TTL_MINUTES,
+        ttl_minutes: int | None = None,
         now: datetime | None = None,
     ) -> SessionRecord:
+        effective_ttl = ttl_minutes if ttl_minutes is not None else get_session_ttl_minutes()
         norm_role = str(role or "").strip().upper()
         if norm_role not in VALID_ROLES:
             raise HTTPException(status_code=403, detail=f"Vai trò không hợp lệ: {norm_role}")
@@ -88,7 +124,7 @@ class SessionStore:
             user_id=norm_user,
             role=norm_role,
             issued_at=current,
-            expires_at=current + timedelta(minutes=ttl_minutes),
+            expires_at=current + timedelta(minutes=effective_ttl),
             revoked=False,
         )
         self._sessions[sid] = record

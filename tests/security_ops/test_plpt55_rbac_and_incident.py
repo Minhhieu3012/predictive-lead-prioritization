@@ -6,7 +6,15 @@ from pathlib import Path
 from fastapi import HTTPException
 import pytest
 
-from src.security.auth import MAX_CONCURRENT_SESSIONS, SessionStore, resolve_auth_context
+from src.security.auth import (
+    DEFAULT_PLACEHOLDER_SECRET,
+    MAX_CONCURRENT_SESSIONS,
+    SessionStore,
+    get_env_mode,
+    get_session_secret_key,
+    get_session_ttl_minutes,
+    resolve_auth_context,
+)
 from src.security.incident_hold import (
     HOLD_STALE_DATA,
     activate_emergency_hold,
@@ -110,3 +118,21 @@ def test_sec08_four_hour_incident_hold_and_local_block(tmp_path: Path):
         created_by="sup_01",
     )
     assert blk["blocked"] is True
+
+
+def test_plpt55_env_separation_and_secret_management(monkeypatch):
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.setenv("SESSION_TTL_MINUTES", "120")
+    monkeypatch.delenv("SESSION_SECRET_KEY", raising=False)
+    assert get_env_mode() == "evaluation"
+    assert get_session_ttl_minutes() == 120
+    assert get_session_secret_key() == DEFAULT_PLACEHOLDER_SECRET
+
+    # Ở production, bắt buộc có SESSION_SECRET_KEY thật >= 32 ký tự và không được dùng placeholder
+    monkeypatch.setenv("ENV_MODE", "production")
+    monkeypatch.setenv("SESSION_SECRET_KEY", DEFAULT_PLACEHOLDER_SECRET)
+    with pytest.raises(RuntimeError):
+        get_session_secret_key()
+
+    monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
+    assert len(get_session_secret_key()) == 40

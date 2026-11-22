@@ -13,6 +13,10 @@ from typing import Any
 import unicodedata
 
 from src.config.vn_holidays import count_vn_business_days, is_vn_business_day
+from src.models.serving_router import (
+    FALLBACK_SERVING_MODE as FALLBACK_MODE,
+    get_active_scoring_mode,
+)
 from src.rules.rules_engine import (
     RULES_LABEL,
     _parse_date,
@@ -26,7 +30,6 @@ VN_TZ = timezone(timedelta(hours=7))
 STALE_HOLD_HOURS = 24.0
 STALE_STATUS = "HOLD_STALE_DATA"
 CANONICAL_PRODUCT_FAMILIES = ("Motor_DongCo", "Drive_BienTan", "Transmission_HopSo")
-FALLBACK_MODE = "FALLBACK_RULES_BASELINE"
 
 ALLOWED_OVERRIDE_REASON_CODES = {
     "CUSTOMER_URGENT_CALLBACK",
@@ -48,20 +51,6 @@ def get_daily_capacity_k() -> int:
         return val if val > 0 else 25
     except ValueError:
         return 25
-
-
-def get_active_scoring_mode() -> str:
-    """
-    Khóa cứng chế độ phục vụ mặc định là RULES_BASELINE / FALLBACK_RULES_BASELINE
-    cho tới khi dữ liệu thật đạt Gate G0 và có cờ phê duyệt Gate G1.
-    """
-    g1_approved = os.getenv("GATE_G1_APPROVED", "false").strip().lower() in {"1", "true", "yes"}
-    requested = os.getenv("ACTIVE_SCORING_MODE", RULES_LABEL).strip().upper()
-    if g1_approved and requested == "PREDICTIVE_ML":
-        return "PREDICTIVE_ML"
-    if requested == "PREDICTIVE_ML" and not g1_approved:
-        return FALLBACK_MODE
-    return RULES_LABEL
 
 
 def get_db_path() -> Path:

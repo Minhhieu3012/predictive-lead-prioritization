@@ -22,7 +22,7 @@ from src.services.queue_service import (
     record_workspace_override,
     record_workspace_review,
 )
-from src.services.rbac import (
+from src.security.rbac import (
     VALID_ROLES,
     AuthContext,
     is_rbac_enforced_on_legacy,

@@ -1,24 +1,59 @@
-"""PLPT-24 / PLPT-25 / SEC-01: 5-Role RBAC & Session Validation."""
+"""PLPT-24 / PLPT-25 / SEC-01: 5-Role RBAC Policy Matrix & FastAPI Guards."""
 
-from dataclasses import dataclass
 import os
 from typing import Iterable
 
 from fastapi import Header, HTTPException
 
-VALID_ROLES = {
-    "SALES_READER",
-    "SUPERVISOR",
-    "DATA_STEWARD",
-    "MODEL_REVIEWER",
-    "ADMINISTRATOR",
+from src.security.auth import VALID_ROLES, AuthContext, resolve_auth_context
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "SALES_READER": {
+        "queue:read",
+        "explanations:read",
+        "workspace:review",
+        "workspace:override",
+    },
+    "SUPERVISOR": {
+        "queue:read",
+        "explanations:read",
+        "workspace:review",
+        "workspace:override",
+        "workspace:block",
+        "overdue:audit",
+        "incident:hold",
+    },
+    "DATA_STEWARD": {
+        "queue:read",
+        "ingest:run",
+        "quarantine:resolve",
+        "dedup:review",
+    },
+    "MODEL_REVIEWER": {
+        "queue:read",
+        "evaluation:audit",
+        "model:approve",
+        "model:fallback",
+        "monitoring:read",
+    },
+    "ADMINISTRATOR": {
+        "queue:read",
+        "explanations:read",
+        "workspace:review",
+        "workspace:override",
+        "workspace:block",
+        "incident:hold",
+        "ops:backup",
+        "ops:restore",
+        "ops:exit_export",
+        "rbac:manage",
+    },
 }
 
 
-@dataclass(frozen=True)
-class AuthContext:
-    user_id: str
-    role: str
+def has_permission(role: str, permission: str) -> bool:
+    norm_role = str(role or "").strip().upper()
+    return permission in ROLE_PERMISSIONS.get(norm_role, set())
 
 
 def is_rbac_enforced_on_legacy() -> bool:
@@ -32,41 +67,6 @@ def is_rbac_enforced_on_legacy() -> bool:
 def is_rbac_enforced_on_v1() -> bool:
     """Các endpoint mới /api/v1/workspace/* luôn bật RBAC 401/403 theo mặc định."""
     return os.getenv("RBAC_ENFORCE_V1", "true").strip().lower() in {"1", "true", "yes"}
-
-
-def resolve_auth_context(
-    x_user_role: str | None = None,
-    x_user_id: str | None = None,
-    x_session_expired: str | None = None,
-    authorization: str | None = None,
-    require_auth: bool = True,
-) -> AuthContext | None:
-    if x_session_expired and x_session_expired.strip().lower() in {"1", "true", "yes"}:
-        raise HTTPException(status_code=401, detail="Phiên đăng nhập đã hết hạn (stale/expired session).")
-
-    role = (x_user_role or "").strip().upper()
-    if not role and authorization:
-        # Hỗ trợ dạng "Bearer ROLE:SALES_READER" hoặc "Bearer SALES_READER"
-        token = authorization.strip()
-        if token.lower().startswith("bearer "):
-            token = token[7:].strip()
-        if token.upper().startswith("ROLE:"):
-            role = token[5:].strip().upper()
-        elif token.upper() in VALID_ROLES:
-            role = token.upper()
-        elif token.lower() in {"expired", "invalid", "stale"}:
-            raise HTTPException(status_code=401, detail="Token phiên không hợp lệ hoặc đã hết hạn.")
-
-    if not role:
-        if require_auth:
-            raise HTTPException(status_code=401, detail="Thiếu thông tin xác thực vai trò (X-User-Role hoặc Authorization).")
-        return None
-
-    if role not in VALID_ROLES:
-        raise HTTPException(status_code=403, detail=f"Vai trò không hợp lệ: {role}")
-
-    user_id = (x_user_id or f"user_{role.lower()}").strip()
-    return AuthContext(user_id=user_id, role=role)
 
 
 def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced_on_v1):
@@ -99,3 +99,15 @@ def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced
         return ctx
 
     return _dependency
+
+
+__all__ = [
+    "AuthContext",
+    "ROLE_PERMISSIONS",
+    "VALID_ROLES",
+    "has_permission",
+    "is_rbac_enforced_on_legacy",
+    "is_rbac_enforced_on_v1",
+    "require_roles",
+    "resolve_auth_context",
+]

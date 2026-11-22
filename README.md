@@ -28,12 +28,39 @@ predictive-lead-prioritization/
 │   └── us_03_check.py                  # Kiểm tra schema & dữ liệu quarantine
 ├── src/
 │   ├── api/
-│   │   └── main.py                     # FastAPI endpoint GET /api/queue
+│   │   └── main.py                     # FastAPI endpoint GET /api/queue & /api/v1/workspace/*
+│   ├── config/
+│   │   └── vn_holidays.py              # Lịch ngày làm việc & ngày lễ Việt Nam
 │   ├── ingest/
 │   │   ├── csv_validator.py            # Kiểm tra schema, tách quarantine, nạp raw_*
-│   │   └── deduplicator.py             # Gộp trùng đa kênh -> clean_enquiries & merge_audit_log
-│   └── rules/
-│       └── rules_engine.py             # Chấm điểm RulesScore (0-100) & xếp hạng Tier 0
+│   │   ├── deduplicator.py             # Gộp trùng đa kênh -> clean_enquiries & merge_audit_log
+│   │   └── outcome_maturity.py         # Đánh giá độ chín nhãn 60 ngày & hiệu chỉnh nhãn có phiên bản
+│   ├── rules/                          # Lõi Rules-First (mặc định phục vụ)
+│   │   └── rules_engine.py             # Chấm điểm RulesScore (0-100) & xếp hạng Tier 0
+│   ├── services/
+│   │   └── queue_service.py            # Phân bổ công suất K, 10% exploration, overdue 2BD & telemetry
+│   ├── features/
+│   │   └── pre_t0_store.py             # Kho đặc trưng pre-t0 chống rò rỉ tương lai
+│   ├── models/                         # Nhánh ML có điều kiện (chỉ kích hoạt sau Gate G1)
+│   │   ├── train_candidates.py         # Huấn luyện ứng viên Logistic Regression / Decision Tree
+│   │   ├── explainer.py                # Giải thích top-3 yếu tố đóng góp phi nhân quả
+│   │   ├── shadow_runner.py            # PLPT-56: Chấm điểm ngầm (Shadow Scoring), tách khỏi outcome_events
+│   │   └── serving_router.py           # PLPT-56: Bộ định tuyến mặc định RULES_BASELINE & tự động fallback
+│   ├── evaluation/
+│   │   ├── temporal_benchmark.py       # Đánh giá theo lát cắt thời gian & khóa single-use cohort
+│   │   ├── paired_bootstrap.py         # Khoảng tin cậy ghép cặp 95% theo cụm tài khoản
+│   │   └── gate_g1_decider.py          # Cổng quyết định Gate G1 (G1-C1..G1-C7)
+│   ├── security/                       # Bảo mật, xác thực 5 vai trò RBAC & khóa sự cố 4 giờ
+│   │   ├── auth.py                     # Xác thực phiên 5 vai trò RBAC & giới hạn 5 phiên đồng thời
+│   │   ├── rbac.py                     # Ma trận phân quyền 5 vai trò RBAC (SEC-01)
+│   │   └── incident_hold.py            # Chặn khẩn cấp cục bộ & khóa ứng phó sự cố 4 giờ (SEC-08)
+│   ├── monitoring/                     # Giám sát vận hành hằng ngày (Sprint 4)
+│   │   └── drift_monitor.py            # PLPT-58 / OPS-06: Giám sát trôi dạt, tỷ lệ thiếu & độ bao phủ
+│   ├── pilot/                          # Theo dõi thử nghiệm có giám sát (Sprint 4)
+│   │   └── pilot_tracker.py            # PLPT-57: Phân bổ theo tài khoản & đo công sức 20 ngày làm việc
+│   └── ops/                            # Vận hành & bàn giao (Sprint 5)
+│       ├── backup_restore.py           # OPS-07: Sao lưu 35 ngày & khôi phục tái áp dụng lệnh chặn
+│       └── portable_exit.py            # OPS-08 / DEL-04: Xuất dữ liệu rời bỏ hệ thống định dạng trung lập
 ├── tests/
 │   ├── test_deduplicator.py
 │   └── test_rules_engine.py

@@ -28,7 +28,7 @@ from src.ingest import csv_validator
 from src.ingest.deduplicator import deduplicate_dataframe_with_steward, deduplicate_enquiries
 from src.ingest.outcome_maturity import apply_versioned_label_correction, evaluate_60d_outcome_label
 from src.models.explainer import explain_logreg_row
-from src.models.predict_production import score_production_batch
+from src.models.shadow_runner import run_shadow_batch
 from src.models.train_candidates import (
     RegularizedLogisticRegressionModel,
     TabularPreprocessor,
@@ -123,10 +123,12 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         model = RegularizedLogisticRegressionModel().fit(prep.transform(feat_df), np.array([1.0]))
         m_path = tmp / "manifest.json"
         m_path.write_text(json.dumps({"model_version": "v1", "serving_mode_locked": "RULES_BASELINE"}))
-        scored = score_production_batch(db_path, m_path, model, prep)
+        scored = run_shadow_batch(db_path, m_path, model, prep)
         assert len(scored) == 1
+        assert bool(scored.iloc[0]["is_visible_to_staff"]) is False
+        assert scored.iloc[0]["serving_mode_locked"] == "RULES_BASELINE"
         try:
-            score_production_batch(db_path, m_path, model, prep, requested_tables=["clean_enquiries", "outcome_events"])
+            run_shadow_batch(db_path, m_path, model, prep, requested_tables=["clean_enquiries", "outcome_events"])
             raise AssertionError("Expected LeakageError when joining outcome_events")
         except LeakageError:
             pass

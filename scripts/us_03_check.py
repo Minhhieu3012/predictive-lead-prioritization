@@ -3,7 +3,7 @@ import pandas as pd
 
 # ============================================================
 # PLPT-11 / US-03
-# Audit script cho dá»¯ liá»‡u chuáº©n SongNhat AI-02 trong data/raw/
+# Audit script SongNhat AI-02 trong data/raw/
 # ============================================================
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

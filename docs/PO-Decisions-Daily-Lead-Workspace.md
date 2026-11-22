@@ -1,6 +1,6 @@
 # PO Decisions — Daily Lead Workspace (AI-02, đối chiếu v16)
 
-> **Mục đích:** Chốt các business rules cho Daily Lead Workspace của đội dev trên nền tảng v16 (`src/services/queue_service.py`, `src/api/main.py`, `src/services/rbac.py`, `src/config/vn_holidays.py`).
+> **Mục đích:** Chốt các business rules cho Daily Lead Workspace của đội dev trên nền tảng v16 (`src/services/queue_service.py`, `src/api/main.py`, `src/security/rbac.py`, `src/config/vn_holidays.py`).
 > **Vai trò:** Tài liệu đối chiếu nghiệp vụ cho PO/QA/Dev trên phạm vi Sprint 1–3.
 > **Nguyên tắc:** Chỉ triển khai đúng User Story và AC1–AC4; không mở rộng thành CRM hoặc thêm tính năng ngoài phạm vi.
 
@@ -68,7 +68,7 @@ Ví dụ: `D = 5` mỗi ngày → `quota_tenths` lần lượt `5, 10, 5, 10...`
 - Hiển thị **ordinal rank** (`model_rank`, `final_work_order`), tuyệt đối không diễn giải `rule_score` thành xác suất thắng đơn (kèm `disclaimer` và `non_causal_disclaimer`).
 - `scoring_mode`: mặc định khóa `RULES_BASELINE` / `FALLBACK_RULES_BASELINE` cho tới khi đạt Gate G0 & phê duyệt Gate G1 mới bật `PREDICTIVE_ML`.
 - Hiển thị tối đa 3 `contributing_factors` kèm `source_timestamp`.
-- **RBAC 5 vai trò** (`src/services/rbac.py`, mặc định `RBAC_ENFORCE_AUTH=true`):
+- **RBAC 5 vai trò** (`src/security/rbac.py`, mặc định `RBAC_ENFORCE_AUTH=true`):
   - `SALES_READER`, `SUPERVISOR`, `DATA_STEWARD`, `MODEL_REVIEWER`, `ADMINISTRATOR`.
   - Thiếu thông tin xác thực hoặc phiên hết hạn (`X-Session-Expired: true`) → HTTP `401`.
   - Vai trò không đủ quyền thực hiện action (ví dụ `DATA_STEWARD` gọi override, `SALES_READER` gọi block) → HTTP `403`.

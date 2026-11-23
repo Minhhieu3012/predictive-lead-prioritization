@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 import numpy as np
@@ -21,10 +22,21 @@ MATURE_HORIZON_DAYS = 60
 MIN_G0_TOTAL = 1000
 MIN_G0_POS = 100
 MIN_G0_NEG = 100
+MIN_SEALED_TOTAL = 200
+MIN_SEALED_POS = 40
+MIN_SEALED_NEG = 40
 
 
 class GateG0NotMetError(RuntimeError):
     """Không đủ điều kiện Gate G0 để huấn luyện mô hình ML."""
+
+
+class RefitForbiddenError(RuntimeError):
+    """Cấm tự động refit / ghi đè phiên bản mô hình đã đăng ký trong model_registry."""
+
+
+class TemporalPartitionError(ValueError):
+    """Lỗi phân chia lát cắt thời gian giữa tập huấn luyện và tập kiểm thử kín."""
 
 
 class TabularPreprocessor:
@@ -304,21 +316,33 @@ def filter_mature_training_rows(
     training_cutoff_t0: str,
 ) -> pd.DataFrame:
     """
-    CF-05 & Spec 05:
+    CF-05, Spec 05 & Spec 09:
     - Hợp nhất theo enquiry_id, chỉ giữ nhãn POSITIVE / NEGATIVE (loại bỏ UNKNOWN).
     - Chỉ giữ các bản ghi có t0_time + 60 ngày <= training_cutoff_t0 (loại bỏ chân trời chưa chín).
+    - Khắc phục nợ kỹ thuật Sprint 3: Nếu có cột 'cohort', loại bỏ tuyệt đối SEALED_LATER_TEST
+      khỏi tập huấn luyện (chống lỗi Train=1.200 gộp nhầm tập kiểm thử kín).
     """
     cutoff_dt = _parse_iso(training_cutoff_t0)
     if cutoff_dt is None:
         raise ValueError(f"Invalid training_cutoff_t0: {training_cutoff_t0}")
 
-    merged = enquiries_df.merge(
-        outcomes_df[["enquiry_id", "label"]],
-        on="enquiry_id",
-        how="inner",
-    )
+    if "label" in enquiries_df.columns:
+        merged = enquiries_df.copy()
+    else:
+        merged = enquiries_df.merge(
+            outcomes_df[["enquiry_id", "label"]],
+            on="enquiry_id",
+            how="inner",
+        )
     merged["label_norm"] = merged["label"].astype(str).str.strip().str.upper()
     merged = merged[merged["label_norm"].isin({"POSITIVE", "NEGATIVE"})].copy()
+
+    # Nợ kỹ thuật Sprint 3: Loại trừ tuyệt đối SEALED_LATER_TEST
+    for cohort_col in ("cohort", "cohort_enq"):
+        if cohort_col in merged.columns:
+            merged = merged[
+                merged[cohort_col].astype(str).str.strip().str.upper() != "SEALED_LATER_TEST"
+            ].copy()
 
     keep_mask = []
     for t0_raw in merged["t0_time"]:
@@ -331,6 +355,260 @@ def filter_mature_training_rows(
     return merged.loc[keep_mask].copy()
 
 
+def partition_training_and_sealed_test(
+    enquiries_df: pd.DataFrame,
+    outcomes_df: pd.DataFrame,
+    *,
+    training_cutoff_t0: str,
+    enforce_floors: bool = True,
+) -> dict[str, pd.DataFrame]:
+    """
+    PLPT-63 & Spec 09 (Mục 1): Khắc phục nợ Sprint 3.
+    Tách chuẩn xác định:
+    - TRAINING_CANDIDATE: >= 1.000 hồ sơ chín (>=100 POS, >=100 NEG) trước cutoff.
+    - SEALED_LATER_TEST: >= 200 hồ sơ chín (>=40 POS, >=40 NEG) sau cutoff.
+    - Kiểm chứng tuyệt đối: max(t0_time train) < min(t0_time test) (không chồng lấn thời gian).
+    """
+    cutoff_dt = _parse_iso(training_cutoff_t0)
+    if cutoff_dt is None:
+        raise ValueError(f"Invalid training_cutoff_t0: {training_cutoff_t0}")
+
+    if "label" in enquiries_df.columns:
+        merged = enquiries_df.copy()
+    else:
+        merged = enquiries_df.merge(
+            outcomes_df[["enquiry_id", "label"]],
+            on="enquiry_id",
+            how="inner",
+        )
+    merged["label_norm"] = merged["label"].astype(str).str.strip().str.upper()
+    merged = merged[merged["label_norm"].isin({"POSITIVE", "NEGATIVE"})].copy()
+
+    # Phân tách theo cohort nếu có sẵn cột nhãn cohort, hoặc theo training_cutoff_t0
+    has_cohort = "cohort" in merged.columns
+    if has_cohort:
+        c_series = merged["cohort"].astype(str).str.strip().str.upper()
+        train_raw = merged[c_series == "TRAINING_CANDIDATE"].copy()
+        test_raw = merged[c_series == "SEALED_LATER_TEST"].copy()
+    else:
+        cutoff_ts = pd.to_datetime(training_cutoff_t0, utc=True)
+        enq_t0 = pd.to_datetime(merged["t0_time"], utc=True)
+        train_raw = merged[enq_t0 <= cutoff_ts].copy()
+        test_raw = merged[enq_t0 > cutoff_ts].copy()
+
+    # Áp dụng bộ lọc chín 60 ngày cho tập train
+    train_df = filter_mature_training_rows(train_raw, outcomes_df, training_cutoff_t0)
+    test_df = test_raw.copy()
+
+    n_train = len(train_df)
+    n_train_pos = int((train_df["label_norm"] == "POSITIVE").sum())
+    n_train_neg = int((train_df["label_norm"] == "NEGATIVE").sum())
+
+    n_test = len(test_df)
+    n_test_pos = int((test_df["label_norm"] == "POSITIVE").sum())
+    n_test_neg = int((test_df["label_norm"] == "NEGATIVE").sum())
+
+    if enforce_floors:
+        if n_train < MIN_G0_TOTAL or n_train_pos < MIN_G0_POS or n_train_neg < MIN_G0_NEG:
+            raise TemporalPartitionError(
+                f"Tập TRAINING_CANDIDATE không đạt ngưỡng thể tích: n={n_train} (min {MIN_G0_TOTAL}), "
+                f"pos={n_train_pos} (min {MIN_G0_POS}), neg={n_train_neg} (min {MIN_G0_NEG})."
+            )
+        if n_test < MIN_SEALED_TOTAL or n_test_pos < MIN_SEALED_POS or n_test_neg < MIN_SEALED_NEG:
+            raise TemporalPartitionError(
+                f"Tập SEALED_LATER_TEST không đạt ngưỡng thể tích: n={n_test} (min {MIN_SEALED_TOTAL}), "
+                f"pos={n_test_pos} (min {MIN_SEALED_POS}), neg={n_test_neg} (min {MIN_SEALED_NEG})."
+            )
+
+    # Kiểm tra ranh giới thời gian không chồng lấn
+    if len(train_df) > 0 and len(test_df) > 0:
+        max_train_t0 = pd.to_datetime(train_df["t0_time"], utc=True).max()
+        min_test_t0 = pd.to_datetime(test_df["t0_time"], utc=True).min()
+        if max_train_t0 >= min_test_t0:
+            raise TemporalPartitionError(
+                f"Phát hiện chồng lấn thời gian giữa Train và Sealed Test: "
+                f"max(train)={max_train_t0} >= min(test)={min_test_t0}."
+            )
+
+    return {
+        "train_df": train_df,
+        "sealed_test_df": test_df,
+        "train_count": n_train,
+        "train_pos": n_train_pos,
+        "train_neg": n_train_neg,
+        "sealed_count": n_test,
+        "sealed_pos": n_test_pos,
+        "sealed_neg": n_test_neg,
+    }
+
+
+def ensure_model_registry_table(conn: sqlite3.Connection) -> None:
+    """Tạo bảng model_registry lưu trữ metadata mô hình có phiên bản (MOD 08)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_registry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_version TEXT UNIQUE NOT NULL,
+            candidate_type TEXT NOT NULL,
+            feature_dictionary_hash TEXT NOT NULL,
+            preprocessor_hash TEXT NOT NULL,
+            random_seed INTEGER NOT NULL,
+            training_cutoff_t0 TEXT NOT NULL,
+            training_row_count INTEGER NOT NULL,
+            positive_count INTEGER NOT NULL,
+            negative_count INTEGER NOT NULL,
+            approval_status TEXT NOT NULL DEFAULT 'SHADOW_ONLY',
+            numerical_tolerance REAL NOT NULL DEFAULT 1e-6,
+            registered_at TEXT NOT NULL,
+            artifact_path TEXT,
+            manifest_json TEXT NOT NULL
+        )
+        """
+    )
+
+
+def register_candidate_model(
+    db_path: str | Path,
+    manifest: dict[str, Any],
+    *,
+    artifact_path: str | Path | None = None,
+    allow_refit: bool = False,
+) -> dict[str, Any]:
+    """
+    MOD 08: Đăng ký mô hình vào model_registry.
+    CẤM TỰ ĐỘNG REFIT: Nếu model_version đã tồn tại và allow_refit=False, ném RefitForbiddenError.
+    """
+    version = str(manifest.get("model_version", "")).strip()
+    if not version:
+        raise ValueError("manifest thiếu 'model_version'.")
+
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    cand_type = str(manifest.get("candidate_type", "REGULARIZED_LOGISTIC_REGRESSION"))
+    f_hash = str(manifest.get("feature_dictionary_hash", ""))
+    p_hash = str(manifest.get("preprocessor_hash", ""))
+    seed = int(manifest.get("random_seed", 42))
+    cutoff = str(manifest.get("training_cutoff_t0", ""))
+    n_train = int(manifest.get("training_row_count", 0))
+    n_pos = int(manifest.get("positive_count", 0))
+    n_neg = int(manifest.get("negative_count", 0))
+    status = str(manifest.get("approval_status", "SHADOW_ONLY"))
+    tol = float(manifest.get("numerical_tolerance", 1e-6))
+    manifest_str = json.dumps(manifest, ensure_ascii=False)
+
+    p_art = str(artifact_path) if artifact_path is not None else None
+
+    import contextlib
+
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_model_registry_table(conn)
+            cur = conn.execute(
+                "SELECT id, model_version, registered_at FROM model_registry WHERE model_version = ?",
+                (version,),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                if not allow_refit:
+                    raise RefitForbiddenError(
+                        f"Phiên bản mô hình '{version}' đã được đăng ký lúc {row[2]}. "
+                        "Theo quy định MOD 08, cấm tự động refit/ghi đè cùng phiên bản."
+                    )
+                conn.execute(
+                    """
+                    UPDATE model_registry
+                    SET candidate_type = ?, feature_dictionary_hash = ?, preprocessor_hash = ?,
+                        random_seed = ?, training_cutoff_t0 = ?, training_row_count = ?,
+                        positive_count = ?, negative_count = ?, approval_status = ?,
+                        numerical_tolerance = ?, registered_at = ?, artifact_path = ?, manifest_json = ?
+                    WHERE model_version = ?
+                    """,
+                    (
+                        cand_type, f_hash, p_hash, seed, cutoff, n_train,
+                        n_pos, n_neg, status, tol, now_iso, p_art, manifest_str, version
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO model_registry (
+                        model_version, candidate_type, feature_dictionary_hash, preprocessor_hash,
+                        random_seed, training_cutoff_t0, training_row_count, positive_count,
+                        negative_count, approval_status, numerical_tolerance, registered_at,
+                        artifact_path, manifest_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        version, cand_type, f_hash, p_hash, seed, cutoff, n_train,
+                        n_pos, n_neg, status, tol, now_iso, p_art, manifest_str
+                    ),
+                )
+            conn.commit()
+
+    return {
+        "model_version": version,
+        "approval_status": status,
+        "registered_at": now_iso,
+        "training_row_count": n_train,
+    }
+
+
+def get_registered_model(
+    db_path: str | Path,
+    model_version: str | None = None,
+) -> dict[str, Any] | None:
+    """Lấy thông tin mô hình đã đăng ký từ model_registry (mặc định lấy bản mới nhất)."""
+    import contextlib
+
+    p = Path(db_path)
+    if not p.exists():
+        return None
+
+    with contextlib.closing(sqlite3.connect(str(p))) as conn:
+        ensure_model_registry_table(conn)
+        conn.row_factory = sqlite3.Row
+        if model_version:
+            cur = conn.execute(
+                "SELECT * FROM model_registry WHERE model_version = ? LIMIT 1",
+                (model_version,),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT * FROM model_registry ORDER BY id DESC LIMIT 1"
+            )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        res = dict(row)
+        if "manifest_json" in res:
+            try:
+                res["manifest"] = json.loads(res["manifest_json"])
+            except Exception:
+                res["manifest"] = {}
+        return res
+
+
+def list_registered_models(db_path: str | Path) -> list[dict[str, Any]]:
+    """Liệt kê danh sách tất cả các mô hình trong model_registry."""
+    import contextlib
+
+    p = Path(db_path)
+    if not p.exists():
+        return []
+
+    with contextlib.closing(sqlite3.connect(str(p))) as conn:
+        ensure_model_registry_table(conn)
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT * FROM model_registry ORDER BY id ASC")
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if "manifest_json" in r:
+                try:
+                    r["manifest"] = json.loads(r["manifest_json"])
+                except Exception:
+                    r["manifest"] = {}
+        return rows
+
+
 def train_candidate_models(
     enquiries_df: pd.DataFrame,
     outcomes_df: pd.DataFrame,
@@ -340,6 +618,7 @@ def train_candidate_models(
     artifact_dir: str | Path | None = None,
     enforce_g0_gate: bool = True,
     data_origin: str = "SYNTHETIC",
+    register_in_db: str | Path | None = None,
 ) -> dict[str, Any]:
     """
     Huấn luyện 2 mô hình ứng viên (Logistic Regression + Decision Tree) trên phân vùng lịch sử trước cutoff.
@@ -381,16 +660,25 @@ def train_candidate_models(
         "feature_dictionary_hash": get_feature_dictionary_hash(feature_cols),
         "preprocessor_hash": preprocessor.hash_state(),
         "numerical_tolerance": 1e-6,
-        "approval_status": "PENDING_GATE_G1_REVIEW",
+        "approval_status": "SHADOW_ONLY",
         "serving_mode_locked": "RULES_BASELINE",
     }
 
+    out_file = None
     if artifact_dir is not None:
         out_dir = Path(artifact_dir) / model_version
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "manifest.json").write_text(
+        out_file = out_dir / "manifest.json"
+        out_file.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False),
             encoding="utf-8",
+        )
+
+    if register_in_db is not None:
+        register_candidate_model(
+            register_in_db,
+            manifest,
+            artifact_path=str(out_file) if out_file else None,
         )
 
     return {

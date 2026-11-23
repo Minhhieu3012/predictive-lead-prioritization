@@ -843,5 +843,50 @@
     restorePersistedMessage();
     loadQueue();
   </script>
+
+  <!-- PLPT-72: Daily Monitoring & Drift Summary Panel -->
+  <section id="plpt72-monitoring-panel" style="max-width:1280px;margin:16px auto 32px;padding:16px 20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;font-family:inherit;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h3 style="margin:0;font-size:16px;color:#0f172a;">Giám sát Hàng ngày &amp; Cảnh báo Drift (PLPT-72)</h3>
+        <p style="margin:4px 0 0;font-size:13px;color:#475569;">Theo dõi độ trễ API, tỷ lệ quá hạn 2 ngày làm việc, mức độ override/steward, PSI drift và khuyến nghị retrain.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span id="plpt72-badge" style="padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#e2e8f0;color:#334155;">Đang tải...</span>
+        <button type="button" id="btn-refresh-monitoring" style="padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;cursor:pointer;font-size:13px;">Làm mới giám sát</button>
+      </div>
+    </div>
+    <div id="plpt72-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px;font-size:13px;"></div>
+    <ul id="plpt72-alerts" style="margin:10px 0 0;padding-left:18px;font-size:13px;color:#b91c1c;"></ul>
+  </section>
+  <script>
+    async function loadDailyMonitoring() {
+      const badge = document.getElementById("plpt72-badge");
+      const metricsEl = document.getElementById("plpt72-metrics");
+      const alertsEl = document.getElementById("plpt72-alerts");
+      if (!badge || !metricsEl || !alertsEl) return;
+      try {
+        const res = await fetch("/api/v1/monitoring/daily-summary");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const status = data.overall_status || "OK";
+        badge.textContent = status + (data.retrain_recommended ? " • RETRAIN RECOMMENDED" : "");
+        badge.style.background = status === "CRITICAL" ? "#fee2e2" : (status === "WARNING" ? "#fef3c7" : "#dcfce7");
+        badge.style.color = status === "CRITICAL" ? "#991b1b" : (status === "WARNING" ? "#92400e" : "#166534");
+        const m = data.metrics || {};
+        metricsEl.innerHTML = [
+          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>PSI Score Drift:</strong> </div>,
+          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Overdue >2BD:</strong> </div>,
+          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Override Rate:</strong> </div>,
+          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Quarantine Rate:</strong> </div>
+        ].join("");
+        alertsEl.innerHTML = (data.alerts || []).map(a => <li>[] </li>).join("");
+      } catch (err) {
+        badge.textContent = "UNAVAILABLE";
+      }
+    }
+    document.getElementById("btn-refresh-monitoring")?.addEventListener("click", loadDailyMonitoring);
+    loadDailyMonitoring();
+  </script>
 </body>
 </html>

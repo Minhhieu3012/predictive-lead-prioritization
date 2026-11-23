@@ -1290,3 +1290,6 @@ def get_workspace_queue(
             status_code=500,
             detail=f"Database error: {error}",
         )
+
+from src.api.monitoring import router as monitoring_router
+app.include_router(monitoring_router)

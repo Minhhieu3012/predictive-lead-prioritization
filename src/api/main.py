@@ -1290,3 +1290,58 @@ def get_workspace_queue(
             status_code=500,
             detail=f"Database error: {error}",
         )
+
+from src.pilot.pilot_tracker import log_pilot_effort_session, summarize_pilot_20bd
+
+
+def _guard_not_stale_for_write() -> None:
+    return None
+
+
+@app.post("/api/v1/pilot/effort")
+def post_pilot_effort(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR"}, is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    _guard_not_stale_for_write()
+    db_path = get_db_path()
+    try:
+        entry = log_pilot_effort_session(
+            db_path,
+            business_date=payload.get("business_date") or datetime.now(VN_TZ).date(),
+            staff_id=str(payload.get("staff_id") or (auth.user_id if auth else "sales_user")),
+            enquiries_reviewed=int(payload.get("enquiries_reviewed", 0)),
+            queue_prep_minutes=float(payload.get("queue_prep_minutes", 0.0)),
+            triage_minutes=float(payload.get("triage_minutes", 0.0)),
+            due_total=int(payload.get("due_total", 0)),
+            due_on_time=int(payload.get("due_on_time", 0)),
+            override_count=int(payload.get("override_count", 0)),
+            treatment_arm=str(payload.get("treatment_arm") or "RULES_CONTROL"),
+        )
+        return {"status": "ok", "effort": entry}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+
+@app.get("/api/v1/pilot/telemetry")
+def get_pilot_telemetry(
+    baseline_minutes_per_lead: float = Query(default=6.0, gt=0.0),
+    baseline_on_time_rate: float = Query(default=0.95, ge=0.0, le=1.0),
+    _: AuthContext | None = Depends(
+        require_roles(
+            {"SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"},
+            is_rbac_enforced_on_v1,
+        )
+    ),
+) -> dict[str, Any]:
+    db_path = get_db_path()
+    summary = summarize_pilot_20bd(
+        db_path,
+        baseline_minutes_per_lead=baseline_minutes_per_lead,
+        baseline_on_time_rate=baseline_on_time_rate,
+    )
+    return {"status": "ok", **summary}

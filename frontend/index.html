@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
@@ -844,49 +844,96 @@
     loadQueue();
   </script>
 
-  <!-- PLPT-72: Daily Monitoring & Drift Summary Panel -->
-  <section id="plpt72-monitoring-panel" style="max-width:1280px;margin:16px auto 32px;padding:16px 20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;font-family:inherit;">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <div>
-        <h3 style="margin:0;font-size:16px;color:#0f172a;">Giám sát Hàng ngày &amp; Cảnh báo Drift (PLPT-72)</h3>
-        <p style="margin:4px 0 0;font-size:13px;color:#475569;">Theo dõi độ trễ API, tỷ lệ quá hạn 2 ngày làm việc, mức độ override/steward, PSI drift và khuyến nghị retrain.</p>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span id="plpt72-badge" style="padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#e2e8f0;color:#334155;">Đang tải...</span>
-        <button type="button" id="btn-refresh-monitoring" style="padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;cursor:pointer;font-size:13px;">Làm mới giám sát</button>
-      </div>
-    </div>
-    <div id="plpt72-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px;font-size:13px;"></div>
-    <ul id="plpt72-alerts" style="margin:10px 0 0;padding-left:18px;font-size:13px;color:#b91c1c;"></ul>
-  </section>
-  <script>
-    async function loadDailyMonitoring() {
-      const badge = document.getElementById("plpt72-badge");
-      const metricsEl = document.getElementById("plpt72-metrics");
-      const alertsEl = document.getElementById("plpt72-alerts");
-      if (!badge || !metricsEl || !alertsEl) return;
-      try {
-        const res = await fetch("/api/v1/monitoring/daily-summary");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        const status = data.overall_status || "OK";
-        badge.textContent = status + (data.retrain_recommended ? " • RETRAIN RECOMMENDED" : "");
-        badge.style.background = status === "CRITICAL" ? "#fee2e2" : (status === "WARNING" ? "#fef3c7" : "#dcfce7");
-        badge.style.color = status === "CRITICAL" ? "#991b1b" : (status === "WARNING" ? "#92400e" : "#166534");
-        const m = data.metrics || {};
-        metricsEl.innerHTML = [
-          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>PSI Score Drift:</strong> </div>,
-          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Overdue >2BD:</strong> </div>,
-          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Override Rate:</strong> </div>,
-          <div style="padding:8px 10px;background:#f8fafc;border-radius:6px;"><strong>Quarantine Rate:</strong> </div>
-        ].join("");
-        alertsEl.innerHTML = (data.alerts || []).map(a => <li>[] </li>).join("");
-      } catch (err) {
-        badge.textContent = "UNAVAILABLE";
+    <script>
+    const MONITORING_ROLES = new Set(["MODEL_REVIEWER", "DATA_STEWARD", "SUPERVISOR", "ADMINISTRATOR"]);
+
+    function syncMonitoringTabVisibility() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const monTab = document.getElementById("tab-monitoring");
+      if (monTab) {
+        monTab.style.display = MONITORING_ROLES.has(currentRole) ? "" : "none";
       }
     }
-    document.getElementById("btn-refresh-monitoring")?.addEventListener("click", loadDailyMonitoring);
-    loadDailyMonitoring();
+
+    async function loadMonitoringDrift() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const userId = localStorage.getItem("user_id") || "reviewer_01";
+
+      try {
+        const res = await fetch("/api/v1/monitoring/drift", {
+          headers: {
+            "X-User-Role": currentRole,
+            "X-User-Id": userId
+          }
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const snap = data.daily_snapshot || {};
+
+        document.getElementById("mon-maturity-status").textContent =
+          data.accuracy_assessment_status || "DEFERRED_UNTIL_60D_MATURITY";
+        document.getElementById("mon-retrain-flag").textContent =
+          data.auto_retrain_enabled ? "ENABLED" : "DISABLED (auto_retrain_enabled = false)";
+
+        document.getElementById("mon-daily-volume").textContent = snap.daily_volume ?? 0;
+        const cov = Number(snap.score_coverage_pct ?? 0);
+        document.getElementById("mon-coverage-pct").textContent = cov.toFixed(2) + "%";
+        const bar = document.getElementById("mon-coverage-bar");
+        bar.style.width = Math.min(Math.max(cov, 0), 100) + "%";
+        bar.style.background = cov < 90.0 ? "#dc2626" : "#16a34a";
+
+        const alerts = data.alerts || [];
+        document.getElementById("count-monitoring-alerts").textContent = alerts.length;
+        const banner = document.getElementById("drift-alert-banner");
+        const alertList = document.getElementById("drift-alert-list");
+        alertList.innerHTML = "";
+        if (alerts.length > 0) {
+          banner.hidden = false;
+          alerts.forEach(a => {
+            const li = document.createElement("li");
+            li.textContent = `[${a.spec_code || a.code}] ${a.message}`;
+            alertList.appendChild(li);
+          });
+        } else {
+          banner.hidden = true;
+        }
+
+        const tbody = document.getElementById("mon-missingness-tbody");
+        tbody.innerHTML = "";
+        const rows = snap.missingness_table || [];
+        if (rows.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#64748b;">Chưa có dữ liệu feature trong ngày.</td></tr>';
+        } else {
+          rows.forEach(r => {
+            const delta = Number(r.delta_pp ?? 0);
+            const isBreach = delta >= 10.0;
+            const tr = document.createElement("tr");
+            tr.style.borderBottom = "1px solid #e2e8f0";
+            if (isBreach) {
+              tr.style.backgroundColor = "#fee2e2";
+              tr.style.color = "#991b1b";
+              tr.style.fontWeight = "700";
+            }
+            tr.innerHTML = `
+              <td style="padding:10px;">${r.feature}</td>
+              <td style="padding:10px;">${Number(r.baseline_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${Number(r.current_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${delta >= 0 ? "+" + delta.toFixed(2) : delta.toFixed(2)} pp</td>
+              <td style="padding:10px;">${isBreach ? "🚨 VƯỢT NGƯỠNG (>= 10 pp)" : "Bình thường"}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load monitoring drift:", err);
+      }
+    }
+
+    document.getElementById("btn-reload-drift")?.addEventListener("click", loadMonitoringDrift);
+    syncMonitoringTabVisibility();
+    loadMonitoringDrift();
   </script>
 </body>
 </html>

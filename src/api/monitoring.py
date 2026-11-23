@@ -1,4 +1,4 @@
-"""PLPT-72 / OPS-06: Monitoring & Drift API wrapping src/monitoring/drift_monitor.py."""
+﻿"""PLPT-72 / OPS-06: Monitoring & Drift API wrapping src/monitoring/drift_monitor.py."""
 
 from datetime import datetime, timedelta, timezone
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 import pandas as pd
 
 from src.monitoring.drift_monitor import (
@@ -14,16 +14,12 @@ from src.monitoring.drift_monitor import (
     MISSINGNESS_RISE_THRESHOLD_PP,
     assess_mature_ranking_drift,
     compute_daily_monitoring_snapshot,
+    load_reference_baseline,
+    persist_monitoring_snapshot,
 )
-from src.security.rbac import (
-    VALID_ROLES,
-    AuthContext,
-    is_rbac_enforced_on_v1,
-    require_roles,
-)
-from src.services.queue_service import get_db_path
 
 VN_TZ = timezone(timedelta(hours=7))
+MONITORING_ALLOWED_ROLES = {"MODEL_REVIEWER", "DATA_STEWARD", "SUPERVISOR", "ADMINISTRATOR"}
 
 router = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"])
 
@@ -32,7 +28,20 @@ def _resolve_db_path() -> Path:
     env_path = os.getenv("DATABASE_PATH", "").strip()
     if env_path:
         return Path(env_path)
-    return get_db_path()
+    return Path("data/lead_prioritization.db")
+
+
+def _verify_monitoring_role(
+    x_user_role: str | None = Header(default="MODEL_REVIEWER", alias="X-User-Role"),
+    x_user_id: str | None = Header(default="system_reviewer", alias="X-User-Id"),
+) -> dict[str, str]:
+    role = (x_user_role or "").strip().upper()
+    if role not in MONITORING_ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{role}' is not authorized to access monitoring drift endpoints.",
+        )
+    return {"role": role, "user_id": (x_user_id or "anonymous").strip()}
 
 
 def _load_table_df(
@@ -53,14 +62,12 @@ def _load_table_df(
 
 @router.get("/drift")
 def get_monitoring_drift(
-    _auth: AuthContext | None = Depends(
-        require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_v1)
-    ),
+    _auth: dict[str, str] = Depends(_verify_monitoring_role),
 ) -> dict[str, Any]:
     """
     OPS-06 / PLPT-72: Endpoint giám sát hằng ngày (khối lượng, missingness >= +10pp,
-    coverage < 90%) và đánh giá mature ranking drift (>= 60 ngày dương lịch).
-    Tuyệt đối không tự động retrain (`auto_retrain_allowed = False`).
+    coverage < 90%) và trạng thái chờ nhãn 60 ngày (DEFERRED_UNTIL_60D_MATURITY).
+    Khóa cứng auto_retrain_enabled = False (cấm tự retrain).
     """
     now_vn = datetime.now(VN_TZ)
     db_path = _resolve_db_path()
@@ -80,27 +87,32 @@ def get_monitoring_drift(
             "recommended_fallback_to_rules": False,
             "auto_retrain_allowed": False,
             "auto_retrain_enabled": False,
+            "accuracy_assessment_status": "DEFERRED_UNTIL_60D_MATURITY",
             "daily_snapshot": {
                 "as_of_date": now_vn.date().isoformat(),
                 "daily_volume": 0,
                 "score_coverage_pct": 0.0,
                 "missingness_pct": {},
+                "missingness_table": [],
+                "channel_mix_pct": {},
                 "alerts": [],
             },
             "mature_drift": {
+                "status": "DEFERRED_UNTIL_60D_MATURITY",
                 "mature_eligible_count": 0,
                 "immature_excluded_count": 0,
                 "known_mature_count": 0,
                 "unknown_mature_count": 0,
                 "mature_label_coverage_pct": 0.0,
                 "ranking_drift_assessable": False,
-                "reason": "EMPTY_COHORT",
+                "reason": "DEFERRED_UNTIL_60D_MATURITY",
                 "auto_retrain_allowed": False,
+                "auto_retrain_enabled": False,
             },
             "alerts": [],
         }
 
-    ref_missingness = {col: 0.0 for col in enquiries_df.columns}
+    ref_missingness = load_reference_baseline(list(enquiries_df.columns))
     snapshot = compute_daily_monitoring_snapshot(
         enquiries_df,
         reference_missingness_pct=ref_missingness,
@@ -114,6 +126,9 @@ def get_monitoring_drift(
 
     alerts = list(snapshot.get("alerts", []))
     drift_detected = bool(snapshot.get("investigation_triggered", False))
+    acc_status = mature_report.get("status", "DEFERRED_UNTIL_60D_MATURITY")
+
+    persist_monitoring_snapshot(db_path, snapshot, alerts)
 
     return {
         "status": "DRIFT_DETECTED" if drift_detected else "HEALTHY",
@@ -129,6 +144,7 @@ def get_monitoring_drift(
         ),
         "auto_retrain_allowed": False,
         "auto_retrain_enabled": False,
+        "accuracy_assessment_status": acc_status,
         "daily_snapshot": snapshot,
         "mature_drift": mature_report,
         "alerts": alerts,

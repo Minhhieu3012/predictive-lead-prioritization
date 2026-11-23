@@ -9,6 +9,15 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.rules.rules_engine import RULES_LABEL, build_queue
+from src.models.serving_router import (
+    FALLBACK_SERVING_MODE,
+    get_manual_fallback_state,
+    reset_manual_fallback,
+    resolve_serving_route,
+    trigger_manual_fallback,
+)
+from src.models.shadow_runner import get_shadow_summary
+from src.models.train_candidates import get_registered_model, list_registered_models
 from src.services.queue_service import (
     STALE_HOLD_HOURS,
     STALE_STATUS,
@@ -326,3 +335,72 @@ def post_workspace_override(
         raise HTTPException(status_code=400, detail=str(error))
     except sqlite3.Error as error:
         raise HTTPException(status_code=500, detail=f"Database error: {error}")
+
+
+@app.get("/api/v1/shadow/summary")
+def get_shadow_summary_v1(
+    k: int = Query(default=25, ge=1, le=500),
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-56 / Spec 09: Báo cáo tổng hợp chấm điểm ngầm, SLA batch và tỷ lệ overlap Top-K."""
+    db_path = get_db_path()
+    summary = get_shadow_summary(db_path, k=k)
+    route = resolve_serving_route()
+    summary["active_serving_mode"] = route.active_mode
+    summary["fallback_reason"] = route.fallback_reason
+    summary["fallback_triggered"] = route.fallback_triggered
+    reg_model = get_registered_model(db_path)
+    if reg_model:
+        summary["registered_model"] = {
+            "model_version": reg_model.get("model_version"),
+            "approval_status": reg_model.get("approval_status"),
+            "training_row_count": reg_model.get("training_row_count"),
+            "feature_dictionary_hash": reg_model.get("feature_dictionary_hash"),
+        }
+    return summary
+
+
+@app.post("/api/v1/shadow/fallback")
+def post_shadow_fallback_v1(
+    payload: dict[str, Any] = Body(default={}),
+    auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-56 / Spec 09: Kích hoạt fallback khẩn cấp về RULES_BASELINE có ghi vết bắt buộc."""
+    reason = str(payload.get("reason") or "MANUAL_OPERATOR_OVERRIDE").strip()
+    user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
+    decision = trigger_manual_fallback(reason=reason, triggered_by=user_id)
+    return decision
+
+
+@app.post("/api/v1/shadow/reset")
+def post_shadow_reset_v1(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """Khôi phục trạng thái phục vụ tự động (tắt fallback thủ công)."""
+    reset_manual_fallback()
+    route = resolve_serving_route()
+    return {
+        "status": "RESET_SUCCESS",
+        "active_mode": route.active_mode,
+        "fallback_triggered": route.fallback_triggered,
+        "fallback_reason": route.fallback_reason,
+    }
+
+
+@app.get("/api/v1/models/registry")
+def get_models_registry_v1(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """MOD 08: Tra cứu danh sách các mô hình trong model_registry."""
+    db_path = get_db_path()
+    models = list_registered_models(db_path)
+    return {"total": len(models), "models": models}
+

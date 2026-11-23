@@ -81,6 +81,7 @@
         <div class="meta">
           <span>Vai trò: <strong id="current-role">-</strong></span>
           <span>Chế độ: <span id="scoring-mode" class="badge badge-info">RULES_BASELINE</span></span>
+          <span id="fallback-badge" class="badge badge-warn" style="display: none;">Fallback: <strong id="fallback-reason">-</strong></span>
           <span>Cohort: <strong id="cohort-id">-</strong></span>
           <span>Công suất K: <strong id="capacity-k">25</strong></span>
           <span>Exploration 10%: <strong id="explore-count">0</strong></span>
@@ -265,6 +266,15 @@
         }
 
         document.getElementById("scoring-mode").textContent = data.scoring_mode || "RULES_BASELINE";
+        const fbBadge = document.getElementById("fallback-badge");
+        if (fbBadge) {
+          if (data.fallback_reason) {
+            document.getElementById("fallback-reason").textContent = data.fallback_reason;
+            fbBadge.style.display = "inline-block";
+          } else {
+            fbBadge.style.display = "none";
+          }
+        }
         document.getElementById("cohort-id").textContent = data.cohort_id || "-";
         document.getElementById("capacity-k").textContent = data.capacity_k ?? 25;
         document.getElementById("explore-count").textContent = data.exploration_slots_allocated ?? 0;

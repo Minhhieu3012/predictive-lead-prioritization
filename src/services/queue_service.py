@@ -16,6 +16,7 @@ from src.config.vn_holidays import count_vn_business_days, is_vn_business_day
 from src.models.serving_router import (
     FALLBACK_SERVING_MODE as FALLBACK_MODE,
     get_active_scoring_mode,
+    resolve_serving_route,
 )
 from src.rules.rules_engine import (
     RULES_LABEL,
@@ -672,7 +673,9 @@ def build_workspace_queue_payload(
         steward_count,
     ) = load_enquiries_and_meta(now=now_vn)
     k = capacity_k if capacity_k is not None else get_daily_capacity_k()
-    scoring_mode = get_active_scoring_mode()
+    route_decision = resolve_serving_route()
+    scoring_mode = route_decision.active_mode
+    fallback_reason = route_decision.fallback_reason
     quarantine_count = count_quarantine_rows()
 
     is_stale = source_age_hours is None or source_age_hours > STALE_HOLD_HOURS
@@ -709,6 +712,8 @@ def build_workspace_queue_payload(
             "view": "quarantine",
             "cohort_id": cohort_id,
             "scoring_mode": scoring_mode,
+            "active_mode": scoring_mode,
+            "fallback_reason": fallback_reason,
             "snapshot_age_hours": source_age_hours,
             "capacity_k": k,
             "exploration_slots_allocated": 0,
@@ -828,6 +833,8 @@ def build_workspace_queue_payload(
             "view": "unscored",
             "cohort_id": cohort_id,
             "scoring_mode": scoring_mode,
+            "active_mode": scoring_mode,
+            "fallback_reason": fallback_reason,
             "snapshot_age_hours": source_age_hours,
             "capacity_k": k,
             "exploration_slots_allocated": 0,
@@ -886,6 +893,8 @@ def build_workspace_queue_payload(
         "view": "active",
         "cohort_id": cohort_id,
         "scoring_mode": scoring_mode,
+        "active_mode": scoring_mode,
+        "fallback_reason": fallback_reason,
         "snapshot_age_hours": source_age_hours,
         "capacity_k": k,
         "exploration_slots_allocated": explore_count if not is_stale else 0,

@@ -18,14 +18,26 @@ from src.models.serving_router import (
     resolve_serving_route,
     route_queue_scoring,
 )
-from src.models.shadow_runner import SHADOW_SCORING_MODE, run_shadow_batch
+from src.models.shadow_runner import (
+    SHADOW_SCORING_MODE,
+    compute_shadow_rules_overlap,
+    get_latest_batch_run,
+    get_shadow_summary,
+    run_shadow_batch,
+)
 from src.models.train_candidates import (
     MIN_G0_NEG,
     MIN_G0_POS,
     MIN_G0_TOTAL,
+    RefitForbiddenError,
     RegularizedLogisticRegressionModel,
     TabularPreprocessor,
+    TemporalPartitionError,
     filter_mature_training_rows,
+    get_registered_model,
+    list_registered_models,
+    partition_training_and_sealed_test,
+    register_candidate_model,
 )
 from tests.control_fixtures.fixtures_data import create_clean_db, make_cf_row
 
@@ -179,3 +191,203 @@ def test_plpt56_shadow_runner_isolation_and_router_auto_fallback(tmp_path: Path)
     routed = route_queue_scoring([row], route_decision=default_route, shadow_scores_by_id={"SH-001": 0.77})
     assert routed["route"]["active_mode"] == DEFAULT_SERVING_MODE
     assert routed["items"][0]["shadow_score_logged"] == pytest.approx(0.77)
+
+
+def test_plpt63_partition_and_remediate_sprint3_debt():
+    """PLPT-63: Khắc phục nợ kỹ thuật Sprint 3 - phân tách chuẩn 1.000 train / 200 sealed test."""
+    train_start = datetime(2025, 1, 1, 8, 0, tzinfo=VN_TZ)
+    test_start = datetime(2025, 9, 1, 8, 0, tzinfo=VN_TZ)
+    cutoff_iso = "2025-08-31T23:59:59+07:00"
+
+    enq_rows = []
+    out_rows = []
+
+    # 1.000 hồ sơ TRAINING_CANDIDATE
+    for i in range(1000):
+        t0 = train_start + timedelta(hours=i * 3)
+        eid = f"TR-{i:04d}"
+        enq_rows.append(
+            make_cf_row(
+                enquiry_id=eid,
+                account_key=f"ACCT-{i % 300:04d}",
+                t0_time=t0.isoformat(),
+                cohort="TRAINING_CANDIDATE",
+            )
+        )
+        out_rows.append({"enquiry_id": eid, "label": "POSITIVE" if i < 150 else "NEGATIVE"})
+
+    # 200 hồ sơ SEALED_LATER_TEST
+    for j in range(200):
+        t0 = test_start + timedelta(hours=j * 6)
+        eid = f"TE-{j:04d}"
+        enq_rows.append(
+            make_cf_row(
+                enquiry_id=eid,
+                account_key=f"ACCT-T-{j % 100:04d}",
+                t0_time=t0.isoformat(),
+                cohort="SEALED_LATER_TEST",
+            )
+        )
+        out_rows.append({"enquiry_id": eid, "label": "POSITIVE" if j < 50 else "NEGATIVE"})
+
+    enq_df = pd.DataFrame(enq_rows)
+    out_df = pd.DataFrame(out_rows)
+
+    parts = partition_training_and_sealed_test(
+        enq_df,
+        out_df,
+        training_cutoff_t0=cutoff_iso,
+        enforce_floors=True,
+    )
+    assert parts["train_count"] == 1000
+    assert parts["train_pos"] >= 100
+    assert parts["train_neg"] >= 100
+    assert parts["sealed_count"] == 200
+    assert parts["sealed_pos"] >= 40
+    assert parts["sealed_neg"] >= 40
+
+    # Khắc phục lỗi Train=1200: filter_mature_training_rows trên cả 1.200 dòng vẫn loại bỏ tuyệt đối SEALED_LATER_TEST
+    train_only = filter_mature_training_rows(enq_df, out_df, training_cutoff_t0=cutoff_iso)
+    assert len(train_only) == 1000
+    assert "SEALED_LATER_TEST" not in train_only["cohort"].values
+
+    # Ca vi phạm thể tích hoặc chồng lấn thời gian ném TemporalPartitionError
+    with pytest.raises(TemporalPartitionError):
+        partition_training_and_sealed_test(
+            enq_df.iloc[:500],
+            out_df.iloc[:500],
+            training_cutoff_t0=cutoff_iso,
+            enforce_floors=True,
+        )
+
+
+def test_plpt63_model_registry_and_prohibit_silent_refit(tmp_path: Path):
+    """PLPT-63 & MOD 08: Đăng ký mô hình vào model_registry và cấm tự động refit cùng version."""
+    db_path = tmp_path / "registry.db"
+    manifest = {
+        "model_version": "plpt-logreg-v1.0.0",
+        "candidate_type": "REGULARIZED_LOGISTIC_REGRESSION",
+        "feature_dictionary_hash": "sha256:abc12345",
+        "preprocessor_hash": "sha256:prep9876",
+        "random_seed": 42,
+        "training_cutoff_t0": "2025-08-31T23:59:59+07:00",
+        "training_row_count": 1000,
+        "positive_count": 150,
+        "negative_count": 850,
+        "approval_status": "SHADOW_ONLY",
+        "numerical_tolerance": 1e-6,
+    }
+
+    # Đăng ký lần đầu thành công
+    res = register_candidate_model(db_path, manifest)
+    assert res["model_version"] == "plpt-logreg-v1.0.0"
+    assert res["approval_status"] == "SHADOW_ONLY"
+
+    # Lấy thông tin mô hình đã đăng ký
+    saved = get_registered_model(db_path, "plpt-logreg-v1.0.0")
+    assert saved is not None
+    assert saved["random_seed"] == 42
+    assert saved["feature_dictionary_hash"] == "sha256:abc12345"
+
+    models = list_registered_models(db_path)
+    assert len(models) == 1
+
+    # CẤM TỰ ĐỘNG REFIT: Gọi lại cùng version ném RefitForbiddenError
+    with pytest.raises(RefitForbiddenError):
+        register_candidate_model(db_path, manifest, allow_refit=False)
+
+
+def test_plpt64_shadow_runner_sla_and_batch_run_logs(tmp_path: Path):
+    """PLPT-64 / OPS 02: Shadow runner ghi vết vào shadow_scoring_logs và batch_run_logs với SLA <= 15 phút."""
+    db_path = tmp_path / "shadow_sla.db"
+    rows = [
+        make_cf_row(enquiry_id=f"SH-{i:03d}", account_key=f"ACCT-{i % 10:02d}")
+        for i in range(1, 21)
+    ]
+    create_clean_db(db_path, rows)
+
+    feat_df, cols = build_pre_t0_features(pd.DataFrame(rows), strict_leakage=True)
+    prep = TabularPreprocessor(cols).fit(feat_df)
+    model = RegularizedLogisticRegressionModel().fit(
+        prep.transform(feat_df),
+        np.array([1.0 if i % 2 == 0 else 0.0 for i in range(len(rows))]),
+    )
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "plpt-logreg-v1.0.0",
+                "approval_status": "SHADOW_ONLY",
+                "serving_mode_locked": "RULES_BASELINE",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    shadow_df = run_shadow_batch(db_path, manifest_path, model, prep, persist_logs=True)
+    assert len(shadow_df) == 20
+    assert "shadow_rank" in shadow_df.columns
+    assert list(shadow_df["shadow_rank"]) == list(range(1, 21))
+
+    # Kiểm tra bản ghi trong shadow_scoring_logs
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM shadow_scoring_logs").fetchone()[0]
+        assert count == 20
+
+    # Kiểm tra SLA và batch_run_logs
+    latest_run = get_latest_batch_run(db_path)
+    assert latest_run is not None
+    assert latest_run["status"] == "SUCCESS"
+    assert latest_run["records_processed"] == 20
+    assert latest_run["sla_met"] == 1
+    assert float(latest_run["duration_seconds"]) < 900.0
+
+    # Kiểm tra tính năng Top-K overlap và shadow summary
+    overlap = compute_shadow_rules_overlap(db_path, k=10, shadow_df=shadow_df)
+    assert 0.0 <= overlap <= 1.0
+
+    summary = get_shadow_summary(db_path, manifest_path=manifest_path, k=10)
+    assert summary["active_serving_mode"] == "RULES_BASELINE"
+    assert summary["sla_met"] is True
+    assert summary["records_processed"] == 20
+    assert summary["shadow_record_count"] == 20
+
+
+def test_plpt56_manual_fallback_and_api_integration(tmp_path: Path):
+    """PLPT-56 / Spec 09: Kích hoạt fallback thủ công và hiển thị rõ ràng trên API và hàng đợi."""
+    from src.models.serving_router import (
+        get_manual_fallback_state,
+        reset_manual_fallback,
+        trigger_manual_fallback,
+    )
+    from src.api.main import (
+        get_shadow_summary_v1,
+        post_shadow_fallback_v1,
+        post_shadow_reset_v1,
+        get_workspace_queue,
+    )
+
+    # Reset ban đầu
+    reset_manual_fallback()
+    assert get_manual_fallback_state()["manual_fallback_active"] is False
+
+    # Kích hoạt fallback thủ công
+    fb = trigger_manual_fallback("DRIFT_ALERT_TRIGGERED", triggered_by="TEST_REVIEWER")
+    assert fb["status"] == "FALLBACK_ACTIVE"
+    assert fb["fallback_reason"] == "DRIFT_ALERT_TRIGGERED"
+
+    route = resolve_serving_route()
+    assert route.active_mode == FALLBACK_SERVING_MODE
+    assert route.fallback_triggered is True
+    assert "DRIFT_ALERT_TRIGGERED" in str(route.fallback_reason)
+
+    # Gọi API shadow fallback
+    api_fb = post_shadow_fallback_v1({"reason": "AUDIT_FAIL"}, auth=None)
+    assert api_fb["fallback_reason"] == "AUDIT_FAIL"
+
+    # Gọi API shadow reset
+    api_reset = post_shadow_reset_v1(_auth=None)
+    assert api_reset["status"] == "RESET_SUCCESS"
+    assert api_reset["fallback_triggered"] is False
+

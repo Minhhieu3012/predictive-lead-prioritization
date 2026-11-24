@@ -1293,3 +1293,6 @@ def get_workspace_queue(
 
 from src.api.monitoring import router as monitoring_router
 app.include_router(monitoring_router)
+
+from src.api.monitoring import router as monitoring_router
+app.include_router(monitoring_router)

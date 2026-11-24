@@ -935,5 +935,204 @@
     syncMonitoringTabVisibility();
     loadMonitoringDrift();
   </script>
+<!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->
+<!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->
+<section id="plpt69-pilot-panel" style="margin:24px 0;padding:16px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h3 style="margin:0 0 4px 0;">Pilot Telemetry &amp; Effort Reduction Report (PLPT-69)</h3>
+      <small id="plpt69-status-note" style="color:#475569;">M?c ti?u: &ge; 20 ng?y l?m vi?c VN, gi?m c?ng s?c &ge; 20%, 0 xung ??t account_key, t?ch bi?t exposure_logs &amp; outcome_events.</small>
+    </div>
+    <button id="btn-plpt69-refresh" type="button" style="padding:6px 12px;cursor:pointer;">C?p nh?t b?o c?o Pilot</button>
+  </div>
+
+  <div id="plpt69-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px;">
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Ng?y l?m vi?c VN</div>
+      <div id="m-bdays" style="font-size:18px;font-weight:700;">- / 20</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Gi?m c?ng s?c (%)</div>
+      <div id="m-effort-red" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Ph?t / h? s? (Pilot vs Base)</div>
+      <div id="m-min-per-enq" style="font-size:16px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">??ng h?n SLA (%)</div>
+      <div id="m-sla" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Xung ??t Account</div>
+      <div id="m-conflicts" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <strong>exposure_logs (Hi?n th? ph?n lo?i)</strong>
+      <div style="font-size:12px;color:#64748b;">L?u rank, score_mode, reasons l?c ph?i b?y; t?ch bi?t outcome_events.</div>
+      <div id="plpt69-exposure-count" style="margin-top:6px;font-weight:600;">?? ghi: 0 b?n ghi</div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="plpt69-enq-input" type="text" placeholder="enquiry_id (vd: SN-0001)" style="padding:4px 8px;flex:1;min-width:140px;" />
+        <input id="plpt69-acct-input" type="text" placeholder="account_key (vd: ACCT-01)" style="padding:4px 8px;flex:1;min-width:140px;" />
+        <button id="btn-plpt69-log-triage" type="button" style="padding:5px 10px;cursor:pointer;">Ghi nh?n triage_duration_seconds</button>
+      </div>
+    </div>
+
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <strong>outcome_events (T?ch bi?t ho?n to?n)</strong>
+      <div style="font-size:12px;color:#64748b;">Nh?n tr??ng th?nh sau 60 ng?y d??ng l?ch ? kh?ng tr?n v?i exposure_logs / override_logs.</div>
+      <div id="plpt69-outcome-count" style="margin-top:6px;font-weight:600;">?? ghi: 0 s? ki?n</div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="plpt69-outcome-enq" type="text" placeholder="enquiry_id cho outcome_events" style="padding:4px 8px;flex:1;min-width:160px;" />
+        <button id="btn-plpt69-record-outcome" type="button" style="padding:5px 10px;cursor:pointer;">Ghi outcome_event (60d)</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const triageStartMap = {};
+  const exposureLogs = [];
+  const outcomeEvents = [];
+
+  function markTriageStart(enquiryId) {
+    if (!enquiryId) return;
+    if (!triageStartMap[enquiryId]) {
+      triageStartMap[enquiryId] = performance.now();
+    }
+  }
+
+  function consumeTriageDurationSeconds(enquiryId) {
+    const start = triageStartMap[enquiryId];
+    if (typeof start !== "number") return 1.0;
+    delete triageStartMap[enquiryId];
+    return Math.max(0.1, Number(((performance.now() - start) / 1000).toFixed(2)));
+  }
+
+  function recordExposureBatch(items) {
+    if (!Array.isArray(items)) return;
+    const exposedAt = new Date().toISOString();
+    items.forEach((it, idx) => {
+      const enqId = it.enquiry_id || it.id || "";
+      if (enqId) markTriageStart(enqId);
+      exposureLogs.push({
+        stream: "exposure_logs",
+        enquiry_id: enqId,
+        rank: it.final_rank ?? it.rank ?? (idx + 1),
+        score_mode: it.score_mode || "RULES_FALLBACK",
+        reasons: it.reasons || [],
+        exposed_at: exposedAt,
+        isolated_from_outcome_events: true,
+      });
+    });
+    const el = document.getElementById("plpt69-exposure-count");
+    if (el) el.textContent = `?? ghi: ${exposureLogs.length} b?n ghi`;
+  }
+
+  function recordOutcomeEvent(enquiryId, maturityDays = 60) {
+    if (!enquiryId) return;
+    outcomeEvents.push({
+      stream: "outcome_events",
+      enquiry_id: enquiryId,
+      maturity_window_days: maturityDays,
+      recorded_at: new Date().toISOString(),
+      isolated_from_exposure_logs: true,
+      isolated_from_override_logs: true,
+    });
+    const el = document.getElementById("plpt69-outcome-count");
+    if (el) el.textContent = `?? ghi: ${outcomeEvents.length} s? ki?n`;
+  }
+
+  async function refreshPilotTelemetry() {
+    try {
+      const fetcher = typeof apiFetch === "function" ? apiFetch : fetch;
+      const res = await fetcher("/api/v1/pilot/telemetry");
+      if (!res.ok) {
+        const note = document.getElementById("plpt69-status-note");
+        if (note) note.textContent = `Telemetry y?u c?u vai tr? SUPERVISOR/MODEL_REVIEWER/ADMINISTRATOR (HTTP ${res.status}).`;
+        return;
+      }
+      const data = await res.json();
+      const bdays = Number(data.business_days_elapsed ?? 0);
+      const redPct = Number(data.effort_reduction_pct ?? 0);
+      const pilotMin = Number(data.pilot_minutes_per_enquiry ?? 0);
+      const baseMin = Number(data.baseline_minutes_per_enquiry ?? 6.0);
+      const slaPct = Number(data.on_time_sla_rate_pct ?? 0);
+      const conflicts = Number(data.account_assignment_conflict_count ?? 0);
+
+      document.getElementById("m-bdays").textContent = `${bdays} / 20`;
+      const redEl = document.getElementById("m-effort-red");
+      redEl.textContent = `${redPct.toFixed(1)}% (${redPct >= 20 ? "??T >=20%" : "CH?A ??T >=20%"})`;
+      document.getElementById("m-min-per-enq").textContent = `${pilotMin.toFixed(2)}m vs ${baseMin.toFixed(2)}m`;
+      document.getElementById("m-sla").textContent = `${slaPct.toFixed(1)}%`;
+      document.getElementById("m-conflicts").textContent = String(conflicts);
+    } catch (_) {
+      // B? qua n?u ch?a b?t server ? ch? ?? static
+    }
+  }
+
+  if (typeof window.fetch === "function") {
+    const origFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      const resp = await origFetch(input, init);
+      if (url.includes("/api/v1/workspace/queue") && resp.ok) {
+        try {
+          const clone = resp.clone();
+          const json = await clone.json();
+          if (Array.isArray(json.items)) recordExposureBatch(json.items);
+        } catch (_) {}
+      }
+      return resp;
+    };
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("btn-plpt69-refresh")?.addEventListener("click", refreshPilotTelemetry);
+    document.getElementById("btn-plpt69-log-triage")?.addEventListener("click", async () => {
+      const enqId = (document.getElementById("plpt69-enq-input")?.value || "").trim();
+      const acctKey = (document.getElementById("plpt69-acct-input")?.value || "").trim();
+      const durationSec = consumeTriageDurationSeconds(enqId || "__manual__");
+      const fetcher = typeof apiFetch === "function" ? apiFetch : fetch;
+      const res = await fetcher("/api/v1/pilot/effort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enquiries_reviewed: 1,
+          triage_duration_seconds: durationSec,
+          account_key: acctKey || undefined,
+        }),
+      });
+      if (typeof showMessage === "function") {
+        showMessage(res.ok ? "ok" : "err", res.ok ? `?? ghi triage_duration_seconds=${durationSec}s` : "L?i ghi effort");
+      }
+      refreshPilotTelemetry();
+    });
+    document.getElementById("btn-plpt69-record-outcome")?.addEventListener("click", () => {
+      const enqId = (document.getElementById("plpt69-outcome-enq")?.value || "").trim() || "UNSPECIFIED";
+      recordOutcomeEvent(enqId, 60);
+      if (typeof showMessage === "function") {
+        showMessage("ok", `?? ghi outcome_event (60d) t?ch bi?t cho ${enqId}`);
+      }
+    });
+    refreshPilotTelemetry();
+  });
+
+  window.PLPT69_TELEMETRY = {
+    markTriageStart,
+    consumeTriageDurationSeconds,
+    recordExposureBatch,
+    recordOutcomeEvent,
+    getExposureLogs: () => exposureLogs.slice(),
+    getOutcomeEvents: () => outcomeEvents.slice(),
+    refreshPilotTelemetry,
+  };
+})();
+</script>
+
 </body>
 </html>

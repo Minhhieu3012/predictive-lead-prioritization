@@ -23,6 +23,7 @@ from src.models.serving_router import (
 from src.models.shadow_runner import (
     SHADOW_SCORING_MODE,
     compute_shadow_rules_overlap,
+    ensure_shadow_score_table,
     get_latest_batch_run,
     get_shadow_summary,
     log_batch_run,
@@ -515,6 +516,117 @@ def test_plpt65_shadow_summary_routes_to_fallback_on_batch_failure(
         "SHADOW_BATCH_FAILED: scoring model raised ValueError"
     )
     assert get_active_scoring_mode() == FALLBACK_SERVING_MODE
+
+
+def test_failed_partial_shadow_batch_is_not_exposed_to_sales_and_falls_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from src.api.main import app
+    from src.models.serving_router import reset_manual_fallback
+
+    reset_manual_fallback()
+    db_path = tmp_path / "shadow_failed_partial.db"
+    row = make_cf_row(enquiry_id="SH-PARTIAL-1", account_key="ACCT-PARTIAL-1")
+    create_clean_db(db_path, [row])
+
+    feat_df, cols = build_pre_t0_features(pd.DataFrame([row]), strict_leakage=True)
+    prep = TabularPreprocessor(cols).fit(feat_df)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "v1",
+                "approval_status": "SHADOW_ONLY",
+                "serving_mode_locked": "RULES_BASELINE",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FailingModel:
+        def predict_scores(self, _features):
+            raise ValueError("controlled scoring failure")
+
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        ensure_shadow_score_table(conn)
+        conn.commit()
+
+    with pytest.raises(ValueError, match="controlled scoring failure"):
+        run_shadow_batch(
+            db_path,
+            manifest_path,
+            FailingModel(),
+            prep,
+            persist_logs=True,
+            batch_id="failed-partial-shadow-batch",
+        )
+
+    failed_batch = get_latest_batch_run(db_path)
+    assert failed_batch is not None
+    assert failed_batch["status"] == "FAILED_PARTIAL"
+    assert failed_batch["records_processed"] == 0
+    assert failed_batch["error_message"] == "controlled scoring failure"
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM shadow_scoring_logs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM shadow_score_logs").fetchone()[0] == 0
+
+    reference_path = tmp_path / "drift_reference.json"
+    reference_path.write_text(
+        json.dumps({"reference_missingness_pct": {}}),
+        encoding="utf-8",
+    )
+    gate_path = tmp_path / "gate_g1.json"
+    gate_path.write_text(
+        json.dumps(
+            {"gate_g1_decision": "APPROVED_PREDICTIVE_ML", "data_origin": "REAL"}
+        ),
+        encoding="utf-8",
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "v1",
+                "approval_status": "APPROVED",
+                "serving_mode_locked": "UNLOCKED",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("ACTIVE_SCORING_MODE", PREDICTIVE_SERVING_MODE)
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(reference_path))
+    monkeypatch.setenv("GATE_G1_REPORT_PATH", str(gate_path))
+    monkeypatch.setenv("MODEL_MANIFEST_PATH", str(manifest_path))
+    monkeypatch.setenv("RBAC_ENFORCE_V1", "true")
+
+    client = TestClient(app)
+    reviewer_headers = {"X-User-Role": "MODEL_REVIEWER"}
+    summary = client.get("/shadow/summary", headers=reviewer_headers)
+    assert summary.status_code == 200
+    route = summary.json()["route"]
+    assert route["active_mode"] == FALLBACK_SERVING_MODE
+    assert route["rules_only_enforced"] is True
+    assert route["fallback_triggered"] is True
+    assert route["fallback_reason"] == (
+        "SHADOW_BATCH_FAILED: controlled scoring failure"
+    )
+    assert get_active_scoring_mode() == FALLBACK_SERVING_MODE
+
+    sales_headers = {"X-User-Role": "SALES_READER"}
+    sales_queue = client.get(
+        "/api/v1/workspace/queue",
+        headers=sales_headers,
+    )
+    assert sales_queue.status_code == 200
+    sales_payload = sales_queue.json()
+    assert sales_payload["items"]
+    assert sales_payload["scoring_mode"] == FALLBACK_SERVING_MODE
+    assert all(
+        not {"shadow_score", "model_score", "shadow_rank"} & item.keys()
+        for item in sales_payload["items"]
+    )
+    assert client.get("/shadow/summary", headers=sales_headers).status_code == 403
 
 
 def test_plpt65_active_router_falls_back_when_drift_is_detected(

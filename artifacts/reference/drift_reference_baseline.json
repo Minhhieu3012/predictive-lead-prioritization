@@ -1,0 +1,21 @@
+{
+  "baseline_version": "v1.0-approved",
+  "daily_volume_avg": 500,
+  "feature_missing_pct": {
+    "spec_completeness": 2.0,
+    "product_family": 3.0,
+    "estimated_value_vnd": 4.0,
+    "is_urgent_replacement": 1.0,
+    "has_contractual_sla": 1.0,
+    "cohort_id": 0.5,
+    "owner_id": 0.5
+  },
+  "channel_mix_pct": {
+    "Web": 40.0,
+    "Email": 25.0,
+    "Direct_Sales": 15.0,
+    "Phone": 10.0,
+    "Referral": 6.0,
+    "Trade Fair": 4.0
+  }
+}

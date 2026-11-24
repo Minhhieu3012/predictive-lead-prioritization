@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
@@ -842,6 +842,98 @@
 
     restorePersistedMessage();
     loadQueue();
+  </script>
+
+    <script>
+    const MONITORING_ROLES = new Set(["MODEL_REVIEWER", "DATA_STEWARD", "SUPERVISOR", "ADMINISTRATOR"]);
+
+    function syncMonitoringTabVisibility() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const monTab = document.getElementById("tab-monitoring");
+      if (monTab) {
+        monTab.style.display = MONITORING_ROLES.has(currentRole) ? "" : "none";
+      }
+    }
+
+    async function loadMonitoringDrift() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const userId = localStorage.getItem("user_id") || "reviewer_01";
+
+      try {
+        const res = await fetch("/api/v1/monitoring/drift", {
+          headers: {
+            "X-User-Role": currentRole,
+            "X-User-Id": userId
+          }
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const snap = data.daily_snapshot || {};
+
+        document.getElementById("mon-maturity-status").textContent =
+          data.accuracy_assessment_status || "DEFERRED_UNTIL_60D_MATURITY";
+        document.getElementById("mon-retrain-flag").textContent =
+          data.auto_retrain_enabled ? "ENABLED" : "DISABLED (auto_retrain_enabled = false)";
+
+        document.getElementById("mon-daily-volume").textContent = snap.daily_volume ?? 0;
+        const cov = Number(snap.score_coverage_pct ?? 0);
+        document.getElementById("mon-coverage-pct").textContent = cov.toFixed(2) + "%";
+        const bar = document.getElementById("mon-coverage-bar");
+        bar.style.width = Math.min(Math.max(cov, 0), 100) + "%";
+        bar.style.background = cov < 90.0 ? "#dc2626" : "#16a34a";
+
+        const alerts = data.alerts || [];
+        document.getElementById("count-monitoring-alerts").textContent = alerts.length;
+        const banner = document.getElementById("drift-alert-banner");
+        const alertList = document.getElementById("drift-alert-list");
+        alertList.innerHTML = "";
+        if (alerts.length > 0) {
+          banner.hidden = false;
+          alerts.forEach(a => {
+            const li = document.createElement("li");
+            li.textContent = `[${a.spec_code || a.code}] ${a.message}`;
+            alertList.appendChild(li);
+          });
+        } else {
+          banner.hidden = true;
+        }
+
+        const tbody = document.getElementById("mon-missingness-tbody");
+        tbody.innerHTML = "";
+        const rows = snap.missingness_table || [];
+        if (rows.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#64748b;">Chưa có dữ liệu feature trong ngày.</td></tr>';
+        } else {
+          rows.forEach(r => {
+            const delta = Number(r.delta_pp ?? 0);
+            const isBreach = delta >= 10.0;
+            const tr = document.createElement("tr");
+            tr.style.borderBottom = "1px solid #e2e8f0";
+            if (isBreach) {
+              tr.style.backgroundColor = "#fee2e2";
+              tr.style.color = "#991b1b";
+              tr.style.fontWeight = "700";
+            }
+            tr.innerHTML = `
+              <td style="padding:10px;">${r.feature}</td>
+              <td style="padding:10px;">${Number(r.baseline_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${Number(r.current_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${delta >= 0 ? "+" + delta.toFixed(2) : delta.toFixed(2)} pp</td>
+              <td style="padding:10px;">${isBreach ? "🚨 VƯỢT NGƯỠNG (>= 10 pp)" : "Bình thường"}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load monitoring drift:", err);
+      }
+    }
+
+    document.getElementById("btn-reload-drift")?.addEventListener("click", loadMonitoringDrift);
+    syncMonitoringTabVisibility();
+    loadMonitoringDrift();
   </script>
 <!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->
 <!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->

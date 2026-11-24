@@ -41,6 +41,19 @@
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
     th { background: #f8fafc; font-weight: 600; color: #475569; }
+    tbody tr { transition: opacity 0.28s ease, transform 0.28s ease, background-color 0.2s ease; }
+    tbody tr.row-blocking {
+      background-color: #fef2f2;
+      opacity: 0;
+      transform: translateX(24px);
+      pointer-events: none;
+    }
+    tbody tr.row-blocking td {
+      padding-top: 0;
+      padding-bottom: 0;
+      border-bottom-width: 0;
+      transition: padding 0.28s ease;
+    }
     .tier0 { display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
     .overdue { display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
     .msg { display: none; margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; }
@@ -278,11 +291,12 @@
         const overloadBanner = document.getElementById("overload-banner");
         const queueCard = document.getElementById("queue-card");
         const isHeld = data.status === "HOLD_STALE_DATA" || data.locked === true;
+        const isOverloaded = data.status === "CAPACITY_EXCEEDED" || data.is_overloaded === true;
 
         badge.textContent = data.status;
-        badge.className = `badge ${isHeld ? "badge-hold" : "badge-ok"}`;
+        badge.className = `badge ${isHeld ? "badge-hold" : (isOverloaded ? "badge-warn" : "badge-ok")}`;
 
-        if (data.is_overloaded) {
+        if (isOverloaded) {
           overloadBanner.style.display = "block";
           overloadBanner.textContent = "CẢNH BÁO QUÁ TẢI: Số lượng hồ sơ TIER_0 hoặc quá hạn 2 ngày làm việc vượt công suất K.";
         } else {
@@ -299,8 +313,9 @@
         staleBanner.style.display = "none";
         queueCard.style.display = "block";
 
+        const savedScrollY = window.scrollY;
         const tbody = document.getElementById("queue-body");
-        tbody.replaceChildren();
+        const frag = document.createDocumentFragment();
 
         const items = data.items || [];
         const sess = getSession();
@@ -315,13 +330,15 @@
         }
         for (const row of items) {
           const tr = document.createElement("tr");
+          tr.dataset.enquiryId = String(row.enquiry_id || "");
+          tr.dataset.accountKey = String(row.account_key || "");
 
           if (currentView === "quarantine") {
             const tdQ = document.createElement("td");
             tdQ.colSpan = 8;
             tdQ.textContent = `${row.enquiry_id || "(no-id)"} | ${row.quarantine_source || ""} | Lý do: ${row.quarantine_reason || ""}`;
             tr.appendChild(tdQ);
-            tbody.appendChild(tr);
+            frag.appendChild(tr);
             continue;
           }
 
@@ -455,8 +472,10 @@
 
           tdAction.append(consentLabel, btnAccept, document.createTextNode(" "), btnOverride);
           tr.append(tdModelRank, tdWorkOrder, tdCohortOwner, tdLead, tdScore, tdSla, tdFactors, tdAction);
-          tbody.appendChild(tr);
+          frag.appendChild(tr);
         }
+        tbody.replaceChildren(frag);
+        window.scrollTo({ top: savedScrollY, behavior: "instant" });
       } catch (err) {
         if (String(err.message) !== "HTTP 401" && String(err.message) !== "Unauthorized") {
           showMessage("err", "Không kết nối được API tại http://127.0.0.1:8000.");
@@ -464,25 +483,61 @@
       }
     }
 
+    async function animateAndRemoveBlockedRows(blockedEnqId, blockedAcctKey) {
+      const tbody = document.getElementById("queue-body");
+      const targets = Array.from(tbody.querySelectorAll("tr")).filter((tr) => {
+        const eq = tr.dataset.enquiryId || "";
+        const ac = tr.dataset.accountKey || "";
+        if (blockedEnqId && eq === blockedEnqId) return true;
+        if (!blockedEnqId && blockedAcctKey && ac === blockedAcctKey) return true;
+        return false;
+      });
+      if (targets.length === 0) return;
+
+      for (const tr of targets) {
+        tr.classList.add("row-blocking");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      for (const tr of targets) {
+        tr.remove();
+      }
+      // Đánh lại số thứ tự hiển thị tạm thời trước khi đồng bộ nền từ API
+      Array.from(tbody.querySelectorAll("tr")).forEach((tr, idx) => {
+        const orderStrong = tr.querySelector("td:nth-child(2) strong");
+        if (orderStrong) orderStrong.textContent = `#${idx + 1}`;
+      });
+    }
+
     async function submitBlock() {
-      const enquiry_id = document.getElementById("enquiry_id").value.trim();
-      const account_key = document.getElementById("account_key").value.trim();
+      const enqInput = document.getElementById("enquiry_id");
+      const acctInput = document.getElementById("account_key");
+      const btnBlock = document.getElementById("btn-submit-block");
+      const enquiry_id = enqInput.value.trim();
+      const account_key = acctInput.value.trim();
       const reason = document.getElementById("reason").value.trim();
       if (!enquiry_id && !account_key) {
         showMessage("err", "Vui lòng nhập enquiry_id hoặc account_key.");
         return;
       }
-      const res = await apiFetch("/api/block", {
-        method: "POST",
-        body: JSON.stringify({ enquiry_id, account_key, reason }),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        showMessage("err", result.detail || "Chặn thất bại.");
-        return;
+      btnBlock.disabled = true;
+      try {
+        const res = await apiFetch("/api/block", {
+          method: "POST",
+          body: JSON.stringify({ enquiry_id, account_key, reason }),
+        });
+        const result = await res.json();
+        if (!res.ok) {
+          showMessage("err", result.detail || "Chặn thất bại.");
+          return;
+        }
+        showMessage("ok", `Đã chặn thành công: ${result.enquiry_id || result.account_key}`);
+        enqInput.value = "";
+        acctInput.value = "";
+        await animateAndRemoveBlockedRows(result.enquiry_id || "", result.account_key || "");
+        await loadQueue();
+      } finally {
+        btnBlock.disabled = false;
       }
-      showMessage("ok", `Đã chặn thành công: ${result.enquiry_id || result.account_key}`);
-      loadQueue();
     }
 
     document.getElementById("btn-login").addEventListener("click", () => {

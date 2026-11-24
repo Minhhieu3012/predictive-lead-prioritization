@@ -1,0 +1,12 @@
+{
+  "liveServer.settings.ignoreFiles": [
+    "**/data/**",
+    "**/*.db",
+    "**/*.db-journal",
+    "**/*.db-wal",
+    "**/*.db-shm",
+    "**/*.csv",
+    "**/__pycache__/**",
+    "**/.pytest_cache/**"
+  ]
+}

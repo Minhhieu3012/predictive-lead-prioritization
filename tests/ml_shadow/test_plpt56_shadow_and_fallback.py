@@ -9,12 +9,14 @@ import sqlite3
 import numpy as np
 import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
 from src.features.pre_t0_store import LeakageError, build_pre_t0_features
 from src.models.serving_router import (
     DEFAULT_SERVING_MODE,
     FALLBACK_SERVING_MODE,
     PREDICTIVE_SERVING_MODE,
+    get_active_scoring_mode,
     resolve_serving_route,
     route_queue_scoring,
 )
@@ -23,6 +25,7 @@ from src.models.shadow_runner import (
     compute_shadow_rules_overlap,
     get_latest_batch_run,
     get_shadow_summary,
+    log_batch_run,
     run_shadow_batch,
 )
 from src.models.train_candidates import (
@@ -390,4 +393,186 @@ def test_plpt56_manual_fallback_and_api_integration(tmp_path: Path):
     api_reset = post_shadow_reset_v1(_auth=None)
     assert api_reset["status"] == "RESET_SUCCESS"
     assert api_reset["fallback_triggered"] is False
+
+
+def test_plpt65_shadow_summary_uses_gate_g1_decision_and_routes_to_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from src.api.main import app
+    from src.models.serving_router import reset_manual_fallback
+
+    reset_manual_fallback()
+    db_path = tmp_path / "shadow_summary.db"
+    create_clean_db(
+        db_path,
+        [make_cf_row(enquiry_id="SH-65-1", account_key="ACCT-SH-65")],
+    )
+    reference_path = tmp_path / "drift_reference.json"
+    reference_path.write_text(
+        json.dumps({"reference_missingness_pct": {}}),
+        encoding="utf-8",
+    )
+    gate_path = tmp_path / "gate_g1.json"
+    gate_path.write_text(
+        json.dumps(
+            {
+                "gate_g1_decision": "FALLBACK_RULES_BASELINE",
+                "data_origin": "SYNTHETIC",
+                "failed_criteria": ["REAL_DATA_VERIFIED"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "v1",
+                "approval_status": "PENDING_GATE_G1_REVIEW",
+                "serving_mode_locked": "RULES_BASELINE",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("ACTIVE_SCORING_MODE", PREDICTIVE_SERVING_MODE)
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(reference_path))
+    monkeypatch.setenv("GATE_G1_REPORT_PATH", str(gate_path))
+    monkeypatch.setenv("MODEL_MANIFEST_PATH", str(manifest_path))
+
+    client = TestClient(app)
+    headers = {"X-User-Role": "MODEL_REVIEWER"}
+    summary = client.get("/shadow/summary", headers=headers)
+    assert summary.status_code == 200
+    route = summary.json()["route"]
+    assert route["active_mode"] == FALLBACK_SERVING_MODE
+    assert route["fallback_reason"].startswith("GATE_G1_FALLBACK_RULES_BASELINE_SYNTHETIC")
+    assert "REAL_DATA_VERIFIED" in route["fallback_reason"]
+
+    fallback = client.post("/shadow/fallback", headers=headers, json={})
+    assert fallback.status_code == 200
+    assert fallback.json()["active_mode"] == FALLBACK_SERVING_MODE
+    assert "REAL_DATA_VERIFIED" in fallback.json()["fallback_reason"]
+
+
+def test_plpt65_shadow_summary_routes_to_fallback_on_batch_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from src.api.main import app
+    from src.models.serving_router import reset_manual_fallback
+
+    reset_manual_fallback()
+    db_path = tmp_path / "shadow_batch_failure.db"
+    create_clean_db(
+        db_path,
+        [make_cf_row(enquiry_id="SH-65-2", account_key="ACCT-SH-66")],
+    )
+    log_batch_run(
+        db_path,
+        batch_id="failed-shadow-batch",
+        status="FAILED_PARTIAL",
+        error_message="scoring model raised ValueError",
+    )
+    reference_path = tmp_path / "drift_reference.json"
+    reference_path.write_text(
+        json.dumps({"reference_missingness_pct": {}}),
+        encoding="utf-8",
+    )
+    gate_path = tmp_path / "gate_g1.json"
+    gate_path.write_text(
+        json.dumps(
+            {"gate_g1_decision": "APPROVED_PREDICTIVE_ML", "data_origin": "REAL"}
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "v1",
+                "approval_status": "APPROVED",
+                "serving_mode_locked": "UNLOCKED",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("ACTIVE_SCORING_MODE", PREDICTIVE_SERVING_MODE)
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(reference_path))
+    monkeypatch.setenv("GATE_G1_REPORT_PATH", str(gate_path))
+    monkeypatch.setenv("MODEL_MANIFEST_PATH", str(manifest_path))
+
+    response = TestClient(app).get(
+        "/shadow/summary",
+        headers={"X-User-Role": "MODEL_REVIEWER"},
+    )
+    assert response.status_code == 200
+    route = response.json()["route"]
+    assert route["active_mode"] == FALLBACK_SERVING_MODE
+    assert route["fallback_reason"] == (
+        "SHADOW_BATCH_FAILED: scoring model raised ValueError"
+    )
+    assert get_active_scoring_mode() == FALLBACK_SERVING_MODE
+
+
+def test_plpt65_active_router_falls_back_when_drift_is_detected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from src.api.main import app
+    from src.models.serving_router import reset_manual_fallback
+
+    reset_manual_fallback()
+    db_path = tmp_path / "shadow_drift.db"
+    create_clean_db(
+        db_path,
+        [
+            make_cf_row(
+                enquiry_id="SH-65-3",
+                account_key="ACCT-SH-67",
+                spec_completeness="",
+            )
+        ],
+    )
+    reference_path = tmp_path / "drift_reference.json"
+    reference_path.write_text(
+        json.dumps({"reference_missingness_pct": {"spec_completeness": 0.0}}),
+        encoding="utf-8",
+    )
+    gate_path = tmp_path / "gate_g1.json"
+    gate_path.write_text(
+        json.dumps(
+            {"gate_g1_decision": "APPROVED_PREDICTIVE_ML", "data_origin": "REAL"}
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "model_version": "v1",
+                "approval_status": "APPROVED",
+                "serving_mode_locked": "UNLOCKED",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("ACTIVE_SCORING_MODE", PREDICTIVE_SERVING_MODE)
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(reference_path))
+    monkeypatch.setenv("GATE_G1_REPORT_PATH", str(gate_path))
+    monkeypatch.setenv("MODEL_MANIFEST_PATH", str(manifest_path))
+
+    response = TestClient(app).get(
+        "/shadow/summary",
+        headers={"X-User-Role": "MODEL_REVIEWER"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["drift"]["recommended_fallback_to_rules"] is True
+    assert payload["route"]["active_mode"] == FALLBACK_SERVING_MODE
+    assert payload["route"]["fallback_reason"] == "DRIFT_THRESHOLD_BREACHED"
+    assert get_active_scoring_mode() == FALLBACK_SERVING_MODE
 

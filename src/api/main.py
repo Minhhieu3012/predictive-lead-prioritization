@@ -2,7 +2,9 @@
 
 from datetime import datetime
 import contextlib
+import os
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
@@ -10,8 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.rules.rules_engine import RULES_LABEL, build_queue
 from src.models.serving_router import (
+    DEFAULT_SERVING_MODE,
     FALLBACK_SERVING_MODE,
+    PREDICTIVE_SERVING_MODE,
+    ServingRouteDecision,
     get_manual_fallback_state,
+    get_serving_health,
     reset_manual_fallback,
     resolve_serving_route,
     trigger_manual_fallback,
@@ -39,6 +45,8 @@ from src.security.rbac import (
     require_roles,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 app = FastAPI(
     title="SongNhat AI-02 Predictive Lead Prioritization API",
     version="1.2.0",
@@ -58,6 +66,49 @@ def _get_db_path():
 
 def _count_quarantine_rows() -> int:
     return count_quarantine_rows()
+
+
+def _resolve_shadow_route(
+    db_path: Path,
+    *,
+    requested_mode: str | None = None,
+) -> tuple[
+    ServingRouteDecision,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    str | None,
+]:
+    health = get_serving_health(db_path)
+    route = resolve_serving_route(
+        requested_mode=(
+            requested_mode
+            or os.getenv("ACTIVE_SCORING_MODE", DEFAULT_SERVING_MODE).strip().upper()
+        ),
+        gate_g1_report=Path(
+            os.getenv(
+                "GATE_G1_REPORT_PATH",
+                str(PROJECT_ROOT / "artifacts" / "gate_g1" / "gate_g1_benchmark_report.json"),
+            )
+        ),
+        manifest=Path(
+            os.getenv(
+                "MODEL_MANIFEST_PATH",
+                str(PROJECT_ROOT / "artifacts" / "models" / "plpt-logreg-v1.0.0" / "manifest.json"),
+            )
+        ),
+        batch_error=health["batch_error"],
+        drift_fallback_triggered=bool(
+            health["drift_snapshot"]
+            and health["drift_snapshot"].get("recommended_fallback_to_rules")
+        ),
+        drift_error=health["drift_error"],
+    )
+    return (
+        route,
+        health["latest_batch"],
+        health["drift_snapshot"],
+        health["drift_error"],
+    )
 
 
 @app.get("/api/health")
@@ -337,6 +388,7 @@ def post_workspace_override(
         raise HTTPException(status_code=500, detail=f"Database error: {error}")
 
 
+@app.get("/shadow/summary")
 @app.get("/api/v1/shadow/summary")
 def get_shadow_summary_v1(
     k: int = Query(default=25, ge=1, le=500),
@@ -344,13 +396,20 @@ def get_shadow_summary_v1(
         require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-    """PLPT-56 / Spec 09: Báo cáo tổng hợp chấm điểm ngầm, SLA batch và tỷ lệ overlap Top-K."""
+    """PLPT-65: Shadow summary, drift and fail-safe serving route."""
     db_path = get_db_path()
+    if not db_path.exists():
+        raise HTTPException(status_code=503, detail=f"Database not found: {db_path}")
     summary = get_shadow_summary(db_path, k=k)
-    route = resolve_serving_route()
+    route, latest_batch, drift_snapshot, drift_error = _resolve_shadow_route(db_path)
     summary["active_serving_mode"] = route.active_mode
     summary["fallback_reason"] = route.fallback_reason
     summary["fallback_triggered"] = route.fallback_triggered
+    summary["route"] = route.to_dict()
+    summary["status"] = "FALLBACK" if route.fallback_triggered else "OK"
+    summary["latest_batch"] = latest_batch
+    summary["drift"] = drift_snapshot
+    summary["drift_error"] = drift_error
     reg_model = get_registered_model(db_path)
     if reg_model:
         summary["registered_model"] = {
@@ -362,14 +421,34 @@ def get_shadow_summary_v1(
     return summary
 
 
+@app.post("/shadow/fallback")
 @app.post("/api/v1/shadow/fallback")
 def post_shadow_fallback_v1(
-    payload: dict[str, Any] = Body(default={}),
+    payload: dict[str, Any] | None = Body(default=None),
     auth: AuthContext | None = Depends(
         require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-    """PLPT-56 / Spec 09: Kích hoạt fallback khẩn cấp về RULES_BASELINE có ghi vết bắt buộc."""
+    """PLPT-65: Return the detected automatic fallback or trigger a reasoned operator fallback."""
+    payload = payload or {}
+    db_path = get_db_path()
+    if db_path.exists():
+        route, latest_batch, drift_snapshot, drift_error = _resolve_shadow_route(
+            db_path,
+            requested_mode=PREDICTIVE_SERVING_MODE,
+        )
+        if route.fallback_triggered:
+            return {
+                "status": "FALLBACK_ACTIVE",
+                "active_mode": route.active_mode,
+                "fallback_triggered": True,
+                "fallback_reason": route.fallback_reason,
+                "triggered_by": auth.user_id if auth is not None else "MODEL_REVIEWER",
+                "latest_batch": latest_batch,
+                "drift": drift_snapshot,
+                "drift_error": drift_error,
+            }
+
     reason = str(payload.get("reason") or "MANUAL_OPERATOR_OVERRIDE").strip()
     user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
     decision = trigger_manual_fallback(reason=reason, triggered_by=user_id)

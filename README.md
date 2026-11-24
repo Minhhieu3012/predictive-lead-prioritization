@@ -151,3 +151,10 @@ py -m uvicorn src.api.main:app --reload
 
 Truy cập tài liệu API tương tác tại: `http://127.0.0.1:8000/docs` hoặc kiểm tra hàng đợi tại `http://127.0.0.1:8000/api/queue`.
 
+### Shadow serving API (PLPT-65)
+
+- `GET /shadow/summary` tổng hợp điểm shadow, lần chạy batch gần nhất, tín hiệu drift và quyết định serving.
+- `POST /shadow/fallback` đánh giá điều kiện fallback tự động hoặc kích hoạt fallback thủ công với lý do từ operator.
+- Cả hai endpoint yêu cầu vai trò `MODEL_REVIEWER` hoặc `ADMINISTRATOR` khi RBAC V1 được bật. Lỗi batch/SLA, drift hoặc Gate G1 chưa được duyệt sẽ giữ serving ở `FALLBACK_RULES_BASELINE` và trả về `fallback_reason`.
+- Có thể cấu hình `DATABASE_PATH`, `ACTIVE_SCORING_MODE`, `GATE_G1_REPORT_PATH`, `MODEL_MANIFEST_PATH` và `DRIFT_REFERENCE_PATH` qua biến môi trường.
+

@@ -1,555 +1,1149 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SongNhat AI-02 | Sales Workspace (PLPT-24 / PLPT-25)</title>
+  <title>SongNhat AI-02 | Sales Workspace</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     body { margin: 0; padding: 24px; background: #f4f6f9; color: #1e293b; }
-    .container { max-width: 1280px; margin: 0 auto; }
-    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .container { max-width: 1120px; margin: 0 auto; }
+    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
     .title { margin: 0; font-size: 20px; font-weight: 700; }
-    .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; }
-    .badge { padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; }
-    .badge-ok { background: #dcfce7; color: #166534; }
-    .badge-hold { background: #fee2e2; color: #991b1b; }
-    .badge-warn { background: #fef3c7; color: #92400e; }
-    .badge-info { background: #dbeafe; color: #1e40af; }
-    .banner-hold {
-      display: none; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b;
-      padding: 14px 16px; border-radius: 8px; margin-bottom: 16px; font-weight: 600;
-    }
-    .banner-disclaimer {
-      background: #eff6ff; border: 1px solid #93c5fd; color: #1e3a8a;
-      padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 13px;
-    }
-    .card { background: #ffffff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-    .tab-btn { padding: 8px 14px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; font-weight: 600; font-size: 13px; }
-    .tab-btn.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
-    .block-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-    .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
-    .field label { font-size: 12px; font-weight: 600; color: #475569; }
-    .field input, .field select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
-    button { padding: 9px 14px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btn-primary { background: #2563eb; color: #fff; }
-    .btn-danger { background: #dc2626; color: #fff; }
-    .btn-secondary { background: #e2e8f0; color: #1e293b; }
+    .subtitle { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+    .header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .btn { padding: 9px 14px; border: 1px solid #dbe3ec; border-radius: 7px; background: #fff; color: #1e293b; font-weight: 600; font-size: 13px; }
+    .btn:hover { background: #f8fafc; }
+    .btn-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-warning { border-color: #d97706; background: #d97706; color: #fff; }
+    .btn-warning:hover { background: #b45309; }
+    .btn-danger { border-color: #fecaca; color: #b91c1c; background: #fff; }
+    .btn-danger:hover { background: #fef2f2; }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-    th { background: #f8fafc; font-weight: 600; color: #475569; }
-    .tier0 { display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .overdue { display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
-    .msg { display: none; margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; }
-    .msg.ok { display: block; background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
-    .msg.err { display: block; background: #fef2f2; border: 1px solid #ef4444; color: #991b1b; }
-    .factor-ts { color: #64748b; font-size: 11px; }
-    .consent-box { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 6px; }
+    .notice { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e40af; margin-bottom: 16px; font-size: 13px; line-height: 1.55; }
+    .notice-icon { font-weight: 800; }
+    .notice p { margin: 0; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat, .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .stat { min-height: 100px; padding: 14px 16px; }
+    .stat-label { color: #64748b; font-size: 12px; font-weight: 600; }
+    .stat-value { display: block; margin-top: 5px; font-size: 22px; line-height: 1.2; }
+    .stat-note { margin-top: 6px; color: #64748b; font-size: 11px; }
+    .card { padding: 16px; margin-bottom: 16px; }
+    .block-panel summary { cursor: pointer; color: #334155; font-size: 13px; font-weight: 700; }
+    .block-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding-top: 14px; }
+    .field { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 170px; }
+    .field label { color: #475569; font-size: 12px; font-weight: 600; }
+    .field input, .search-input { width: 100%; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #1e293b; font-size: 13px; }
+    .field input:focus, .search-input:focus { outline: 2px solid #bfdbfe; border-color: #3b82f6; }
+    .message { display: none; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; margin: 12px 0; font-size: 13px; }
+    .message.show { display: block; }
+    .message.ok { border-color: #86efac; background: #dcfce7; color: #166534; }
+    .message.err { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+    .message.info { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+    .workspace-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .workspace-title { margin: 0; font-size: 16px; }
+    .workspace-copy { margin: 4px 0 0; color: #64748b; font-size: 12px; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 700; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-hold { background: #fee2e2; color: #991b1b; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .overload-banner { display: none; padding: 12px 14px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #b91c1c; margin-bottom: 16px; font-size: 13px; font-weight: 600; }
+    .overload-banner.show { display: block; }
+    .tabs { display: flex; gap: 20px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; margin-top: 18px; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #64748b; font-size: 13px; font-weight: 700; white-space: nowrap; }
+    .tab[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
+    .tab-count { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 11px; text-align: center; }
+    .tab[aria-selected="true"] .tab-count { background: #dbeafe; color: #1d4ed8; }
+    .search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 0; }
+    .search-wrap { position: relative; flex: 1; min-width: 220px; }
+    .search-icon { position: absolute; top: 8px; left: 10px; color: #64748b; }
+    .search-input { padding-left: 32px; }
+    .search-hint { color: #64748b; font-size: 11px; }
+    .stale-banner { display: none; padding: 12px 14px; border: 1px solid #ef4444; border-radius: 8px; background: #fef2f2; color: #991b1b; margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+    .stale-banner.show { display: block; }
+    .items { display: grid; gap: 10px; }
+    .lead-card { padding: 14px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
+    .lead-card.overdue { border-left: 4px solid #dc2626; background: #fffcfc; }
+    .lead-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; }
+    .lead-main { min-width: 220px; flex: 1; }
+    .lead-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
+    .tier0 { padding: 3px 7px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700; }
+    .lead-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: #64748b; font-size: 11px; }
+    .lead-meta strong { color: #475569; font-weight: 600; }
+    .lead-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+    .rank-box { min-width: 72px; text-align: center; }
+    .rank-label { display: block; color: #64748b; font-size: 10px; }
+    .rank-value { font-size: 18px; }
+    .score-box { min-width: 62px; text-align: center; }
+    .score-value { display: block; color: #1d4ed8; font-size: 21px; font-weight: 800; line-height: 1.1; }
+    .score-unit { color: #64748b; font-size: 10px; }
+    .work-order { padding: 5px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .card-buttons { display: flex; gap: 6px; margin-left: 10px; }
+    .factors { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; margin-top: 13px; }
+    .factors-label { padding-top: 6px; color: #475569; font-size: 11px; font-weight: 700; }
+    .factor { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; }
+    .factor summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 9px; cursor: pointer; list-style: none; font-size: 11px; }
+    .factor summary::-webkit-details-marker { display: none; }
+    .factor-value { color: #1d4ed8; font-weight: 700; white-space: nowrap; }
+    .factor-detail { padding: 0 9px 8px; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+    .empty-state { padding: 34px 16px; border: 1px dashed #cbd5e1; border-radius: 9px; color: #64748b; text-align: center; font-size: 13px; }
+    .empty-state strong { display: block; margin-bottom: 5px; color: #334155; }
+    
+    /* Modal Styles for PLPT-42 */
+    .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-backdrop.show { display: flex; }
+    .modal-card { background: #fff; border-radius: 12px; width: 100%; max-width: 480px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+    .modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+    .modal-body { font-size: 13px; color: #475569; margin-bottom: 16px; line-height: 1.5; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+    .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; }
+    .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #1e293b; cursor: pointer; }
+
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) {
+      body { padding: 14px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .card { padding: 13px; }
+      .lead-actions { justify-content: flex-start; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Màn hình đăng nhập / Khóa Direct URL & phiên hết hạn -->
-    <div id="login-screen" class="card" style="max-width:460px;margin:48px auto;display:none;">
-      <h2 style="margin-top:0;">Đăng nhập SongNhat AI-02 Workspace</h2>
-      <p style="font-size:13px;color:#475569;">Truy cập trực tiếp URL nội bộ hoặc phiên hết hạn đều yêu cầu xác thực vai trò RBAC.</p>
-      <div class="field" style="margin-bottom:12px;">
-        <label for="login-role">Vai trò (RBAC)</label>
-        <select id="login-role">
-          <option value="SALES_READER">SALES_READER</option>
-          <option value="SUPERVISOR">SUPERVISOR</option>
-          <option value="DATA_STEWARD">DATA_STEWARD</option>
-          <option value="MODEL_REVIEWER">MODEL_REVIEWER</option>
-          <option value="ADMINISTRATOR">ADMINISTRATOR</option>
-        </select>
+  <main class="container">
+    <header class="header">
+      <div>
+        <h1 class="title">SongNhat AI-02 — Sales Workspace</h1>
+        <p class="subtitle">Không gian ưu tiên và rà soát hồ sơ báo giá</p>
       </div>
-      <div class="field" style="margin-bottom:12px;">
-        <label for="login-userid">Mã người dùng</label>
-        <input id="login-userid" type="text" value="sales_01" />
+      <div class="header-actions">
+        <details class="block-panel card" style="margin:0; padding:10px;">
+          <summary>Chặn khẩn cấp</summary>
+          <form id="block-form" class="block-form">
+            <div class="field">
+              <label for="enquiry-id">Mã hồ sơ</label>
+              <input id="enquiry-id" name="enquiry_id" type="text" placeholder="Ví dụ: SN-0610" />
+            </div>
+            <div class="field">
+              <label for="account-key">Mã khách hàng</label>
+              <input id="account-key" name="account_key" type="text" placeholder="Ví dụ: ACCT-0714" />
+            </div>
+            <div class="field">
+              <label for="block-reason">Lý do chặn</label>
+              <input id="block-reason" name="reason" type="text" value="Chặn khẩn cấp theo yêu cầu PO" />
+            </div>
+            <button class="btn btn-danger" type="submit">Xác nhận chặn</button>
+          </form>
+        </details>
+        <button id="create-snapshot" class="btn btn-primary" type="button" hidden>Tạo queue hôm nay</button>
+        <button id="refresh" class="btn" type="button">Làm mới</button>
       </div>
-      <button id="btn-login" type="button" class="btn-primary">Đăng nhập phiên làm việc</button>
-      <div id="login-msg" class="msg"></div>
+    </header>
+
+    <div id="action-message" class="message" role="status" aria-live="polite"></div>
+    <div id="stale-banner" class="stale-banner" role="alert"></div>
+    <div id="overload-banner" class="overload-banner" role="alert">
+      ⚠️ <strong>CẢNH BÁO QUÁ TẢI HÀNG ĐỢI (QUEUE OVERLOAD):</strong> Các mục Tier 0 bắt buộc hoặc quá hạn vượt quá sức chứa daily capacity K!
     </div>
 
-    <!-- Giao diện Workspace chính -->
-    <div id="workspace-screen" style="display:none;">
-      <div class="header">
-        <h1 class="title">SongNhat AI-02 — Sales Workspace (PLPT-24 / PLPT-25)</h1>
-        <div class="meta">
-          <span>Vai trò: <strong id="current-role">-</strong></span>
-          <span>Chế độ: <span id="scoring-mode" class="badge badge-info">RULES_BASELINE</span></span>
-          <span id="fallback-badge" class="badge badge-warn" style="display: none;">Fallback: <strong id="fallback-reason">-</strong></span>
-          <span>Cohort: <strong id="cohort-id">-</strong></span>
-          <span>Công suất K: <strong id="capacity-k">25</strong></span>
-          <span>Exploration 10%: <strong id="explore-count">0</strong></span>
-          <span>Quá hạn 2BD: <strong id="overdue-count">0</strong></span>
-          <span class="badge badge-warn">Quarantine: <strong id="quarantine-count">0</strong></span>
-          <span>Tuổi dữ liệu: <strong id="age-hours">-</strong></span>
-          <span id="status-badge" class="badge badge-ok">OK</span>
-          <button id="btn-refresh" type="button" class="btn-secondary btn-sm">Làm mới</button>
-          <button id="btn-logout" type="button" class="btn-secondary btn-sm">Đăng xuất</button>
+    <section class="notice" aria-label="Giải thích điểm">
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <p><strong>Điểm là tín hiệu ưu tiên, không phải xác suất thắng.</strong>
+        Các yếu tố đóng góp mô tả cách bộ quy tắc thống kê tạo điểm; chúng không chứng minh
+        quan hệ nhân quả và không đảm bảo kết quả bán hàng.</p>
+    </section>
+
+    <section class="stats" aria-label="Tổng quan workspace">
+      <article class="stat">
+        <span class="stat-label">Hồ sơ trong chế độ xem</span>
+        <strong id="stat-total" class="stat-value">—</strong>
+        <div id="stat-status" class="stat-note">Đang tải dữ liệu</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Được xếp lịch hôm nay</span>
+        <strong id="stat-scheduled" class="stat-value">—</strong>
+        <div id="stat-capacity" class="stat-note">Capacity K = —</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Quá hạn 2 ngày làm việc</span>
+        <strong id="stat-overdue-2bd" class="stat-value" style="color:#dc2626;">—</strong>
+        <div class="stat-note">Cần Supervisor rà soát (USR 03)</div>
+      </article>
+      <article class="stat">
+        <span class="stat-label">Tuổi snapshot nguồn</span>
+        <strong id="stat-snapshot-age" class="stat-value">—</strong>
+        <div id="stat-score-mode" class="stat-note">RULES_BASELINE</div>
+        <span id="fallback-badge" class="badge badge-warn" style="display: none; margin-top: 4px;">Fallback: <strong id="fallback-reason">-</strong></span>
+      </article>
+    </section>
+
+    <section class="card" aria-labelledby="workspace-title">
+      <div class="workspace-head">
+        <div>
+          <h2 id="workspace-title" class="workspace-title">Active Queue</h2>
+          <p id="workspace-copy" class="workspace-copy">
+            Hồ sơ đã chấm điểm; hồ sơ deferred vẫn được giữ lại và có thể tìm kiếm.
+          </p>
+        </div>
+        <span id="status-badge" class="badge">Đang tải...</span>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Chế độ xem hồ sơ">
+        <button class="tab" id="tab-active" role="tab" aria-selected="true" aria-controls="queue-panel" data-view="Active">
+          Active Queue <span class="tab-count" id="count-active">—</span>
+        </button>
+        <button class="tab" id="tab-unscored" role="tab" aria-selected="false" aria-controls="queue-panel" data-view="Unscored">
+          Unscored Records <span class="tab-count" id="count-unscored">—</span>
+        </button>
+        <button class="tab" id="tab-quarantine" role="tab" aria-selected="false" aria-controls="queue-panel" data-view="Quarantine">
+          Quarantine Records <span class="tab-count" id="count-quarantine">—</span>
+        </button>
+      </nav>
+
+      <div class="search-row">
+        <label class="search-wrap" for="search-input">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="search-input" class="search-input" type="search" autocomplete="off"
+            placeholder="Tìm mã hồ sơ, cohort, owner, yếu tố đóng góp..." />
+        </label>
+        <span class="search-hint">Tìm kiếm hỗ trợ tiếng Việt không dấu</span>
+      </div>
+      <div id="view-note" class="workspace-copy" hidden></div>
+      <div id="queue-panel" role="tabpanel" aria-labelledby="tab-active">
+        <div id="queue-list" class="items" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL XÁC THỰC QUYỀN LIÊN HỆ (PLPT-42 / USR 07) -->
+  <div id="modal-review" class="modal-backdrop">
+    <div class="modal-card">
+      <h3 class="modal-title">Xác thực quyền liên hệ khách hàng</h3>
+      <div class="modal-body">
+        <p>Hồ sơ: <strong id="review-target-id"></strong></p>
+        <p>Bạn phải xác nhận đã kiểm tra quyền liên hệ hợp pháp trên hệ thống SongNhat trước khi tiến hành outreach.</p>
+        <div class="form-group" style="margin-top: 12px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chk-permission" />
+            Xác nhận <code>contact_permission_verified = TRUE</code>
+          </label>
         </div>
       </div>
-
-      <div class="banner-disclaimer">
-        <strong>Lưu ý phi nhân quả:</strong> Điểm ưu tiên chỉ mang tính hỗ trợ sắp xếp, không phải xác suất thắng đơn hay quan hệ nhân quả (tuyệt đối không hiểu là % tỷ lệ chốt đơn). Hệ thống không tự gửi email/gọi điện/tạo hợp đồng hay sửa CRM gốc.
-      </div>
-
-      <div id="stale-banner" class="banner-hold"></div>
-      <div id="overload-banner" class="banner-hold"></div>
-      <div id="supervisor-aging-panel" class="card" style="display:none;border-left:4px solid #dc2626;">
-        <strong>Cảnh báo Supervisor — Hồ sơ quá hạn 2 ngày làm việc (is_overdue_2bd):</strong>
-        <div id="supervisor-aging-list" style="margin-top:6px;font-size:13px;color:#991b1b;"></div>
-      </div>
-
-      <div class="tabs">
-        <button class="tab-btn active" data-view="active" type="button">Active (K)</button>
-        <button class="tab-btn" data-view="unscored" type="button">Unscored</button>
-        <button class="tab-btn" data-view="quarantine" type="button">Quarantine</button>
-        <select id="overflow-toggle" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">
-          <option value="false">Chỉ Top-K hôm nay</option>
-          <option value="true">Toàn bộ hàng đợi đã chấm điểm</option>
-        </select>
-        <input id="search-query" type="text" placeholder="Tìm tiếng Việt có dấu hoặc không dấu (vd: dong co, bien tan)..." style="flex:1;min-width:260px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
-        <button id="btn-search" type="button" class="btn-primary btn-sm">Lọc</button>
-      </div>
-
-      <div class="card" id="block-panel">
-        <div class="block-form">
-          <div class="field">
-            <label for="enquiry_id">Mã hồ sơ (enquiry_id)</label>
-            <input id="enquiry_id" type="text" placeholder="Ví dụ: SN-0610" />
-          </div>
-          <div class="field">
-            <label for="account_key">Mã khách hàng (account_key)</label>
-            <input id="account_key" type="text" placeholder="Ví dụ: ACCT-0714" />
-          </div>
-          <div class="field">
-            <label for="reason">Lý do chặn khẩn cấp</label>
-            <input id="reason" type="text" value="Chặn khẩn cấp theo yêu cầu PO" />
-          </div>
-          <button id="btn-submit-block" type="button" class="btn-danger">Chặn khẩn cấp</button>
-        </div>
-        <div id="action-msg" class="msg"></div>
-      </div>
-
-      <div class="card" id="queue-card">
-        <table>
-          <thead>
-            <tr>
-              <th>model_rank</th>
-              <th>final_work_order</th>
-              <th>cohort_id / owner</th>
-              <th>Hồ sơ & Khách hàng</th>
-              <th>Điểm (phi %) & Chế độ</th>
-              <th>snapshot_age / SLA</th>
-              <th>Tối đa 3 yếu tố đóng góp & Dấu thời gian</th>
-              <th>Thao tác (ACCEPT / OVERRIDE)</th>
-            </tr>
-          </thead>
-          <tbody id="queue-body"></tbody>
-        </table>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="btn-cancel-review">Hủy</button>
+        <button type="button" class="btn btn-primary" id="btn-submit-review">Xác nhận Review</button>
       </div>
     </div>
+  </div>
 
-    <!-- Modal ghi đè thứ tự bắt buộc chọn mã lý do & nhập giải trình (PLPT-25) -->
-    <div id="override-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);align-items:center;justify-content:center;z-index:50;">
-      <div class="card" style="width:440px;max-width:92vw;">
-        <h3 style="margin-top:0;">Ghi đè thứ tự hàng đợi (<span id="ov-enquiry-label"></span>)</h3>
-        <div class="field" style="margin-bottom:10px;">
-          <label for="override-reason-code">Mã lý do bắt buộc (override_reason_code)</label>
-          <select id="override-reason-code">
+  <!-- MODAL GHI ĐÈ THỨ TỰ (PLPT-42 / USR 04 / MOD 07) -->
+  <div id="modal-override" class="modal-backdrop">
+    <div class="modal-card">
+      <h3 class="modal-title">Ghi đè thứ tự hàng đợi (Queue Override)</h3>
+      <div class="modal-body">
+        <p>Hồ sơ: <strong id="override-target-id"></strong></p>
+        <div class="form-group">
+          <label for="select-reason-code">Mã lý do ghi đè (Bắt buộc):</label>
+          <select id="select-reason-code">
             <option value="CUSTOMER_URGENT_CALLBACK">CUSTOMER_URGENT_CALLBACK</option>
             <option value="EXISTING_PROJECT_DEPENDENCY">EXISTING_PROJECT_DEPENDENCY</option>
             <option value="TECHNICAL_SPEC_CLARIFICATION">TECHNICAL_SPEC_CLARIFICATION</option>
             <option value="OTHER_VERIFIED">OTHER_VERIFIED</option>
           </select>
         </div>
-        <div class="field" style="margin-bottom:12px;">
-          <label for="override-justification">Giải trình nghiệp vụ (bắt buộc)</label>
-          <input id="override-justification" type="text" placeholder="Nhập lý do chi tiết..." />
+        <div class="form-group">
+          <label for="txt-justification">Lý do giải trình chi tiết (Bắt buộc):</label>
+          <textarea id="txt-justification" rows="3" placeholder="Nhập lý do nghiệp vụ cụ thể..."></textarea>
+          <span id="override-error" class="text-danger" style="color:#dc2626; font-size:11px; display:none;">Vui lòng nhập đầy đủ lý do giải trình!</span>
         </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="btn-ov-cancel" type="button" class="btn-secondary">Hủy</button>
-          <button id="btn-ov-submit" type="button" class="btn-primary">Xác nhận ghi đè</button>
-        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="btn-cancel-override">Hủy</button>
+        <button type="button" class="btn btn-warning" id="btn-submit-override">Xác nhận Ghi đè</button>
       </div>
     </div>
   </div>
 
   <script>
     const API_BASE = "http://127.0.0.1:8000";
-    let currentView = "active";
+    const API_LIMIT = 1000;
+    const MESSAGE_STORAGE_KEY = "last_block_msg";
+    const STALE_STATUSES = ["HELD_STALE_DATA", "HOLD_STALE_DATA"];
+    const DEFAULT_STALE_WARNING =
+      "Dữ liệu nguồn quá hạn 24 giờ hoặc chưa xác minh được độ tươi. Active Queue tạm khóa để đảm bảo an toàn vận hành.";
+    const VIEW_TITLES = {
+      Active: "Active Queue",
+      Unscored: "Unscored Records",
+      Quarantine: "Quarantine Records"
+    };
+    const FACTOR_LABELS = {
+      product_fit: "Độ phù hợp sản phẩm",
+      spec_completeness: "Mức đầy đủ thông số",
+      value_band: "Nhóm giá trị ước tính",
+      account_relationship: "Quan hệ tài khoản",
+      channel_source: "Kênh tiếp nhận"
+    };
 
-    function stripVietnameseDiacritics(str) {
-      return String(str || "")
-        .replace(/đ/g, "d").replace(/Đ/g, "D")
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
+    let activeView = "Active";
+    let currentPayload = null;
+    let queueRequestId = 0;
+    let actionMessageTimer = null;
+    let activeEnquiryForAction = null;
+
+    const $ = id => document.getElementById(id);
+
+    function normalizeSearch(value) {
+      return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[đĐ]/g, "d")
+        .toLocaleLowerCase("vi")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
-    function getSession() {
-      const role = sessionStorage.getItem("sn_role");
-      const userId = sessionStorage.getItem("sn_user_id");
-      const expired = sessionStorage.getItem("sn_expired") === "true";
-      if (!role || expired) return null;
-      return { role, userId: userId || "sales_01" };
+    function makeElement(tag, className, text) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined && text !== null) element.textContent = text;
+      return element;
     }
 
-    function showLogin(errMsg = "") {
-      document.getElementById("login-screen").style.display = "block";
-      document.getElementById("workspace-screen").style.display = "none";
-      const msgEl = document.getElementById("login-msg");
-      if (errMsg) {
-        msgEl.className = "msg err";
-        msgEl.textContent = errMsg;
+    function isStale(payload) {
+      return !!payload && (payload.locked === true || STALE_STATUSES.includes(payload.status));
+    }
+
+    function formatSnapshotAge(seconds) {
+      if (seconds === null || seconds === undefined) return "—";
+      const hours = Number(seconds) / 3600;
+      return `${hours.toFixed(2)} giờ`;
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return "Chưa có timestamp nguồn";
+      const timestamp = new Date(value);
+      if (Number.isNaN(timestamp.getTime())) return String(value);
+      return timestamp.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+    }
+
+    function formatDate(value) {
+      if (!value) return "Chưa có hạn hợp đồng";
+      const date = new Date(`${value}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }).format(date);
+    }
+
+    /* ---------- Thông báo thao tác (có lưu qua sessionStorage) ---------- */
+
+    function safeStorage(action) {
+      try { return action(); } catch (_) { return null; }
+    }
+
+    function clearMessage() {
+      const message = $("action-message");
+      message.className = "message";
+      message.textContent = "";
+      if (actionMessageTimer) {
+        clearTimeout(actionMessageTimer);
+        actionMessageTimer = null;
+      }
+      safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+    }
+
+    function showMessage(type, text, durationMs = 0) {
+      const message = $("action-message");
+      message.className = `message show ${type}`;
+      message.textContent = text;
+      if (actionMessageTimer) {
+        clearTimeout(actionMessageTimer);
+        actionMessageTimer = null;
+      }
+      if (durationMs > 0) {
+        const expiresAt = Date.now() + durationMs;
+        safeStorage(() => sessionStorage.setItem(
+          MESSAGE_STORAGE_KEY,
+          JSON.stringify({ type, text, expiresAt })
+        ));
+        actionMessageTimer = setTimeout(clearMessage, durationMs);
       } else {
-        msgEl.className = "msg";
-        msgEl.textContent = "";
+        safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
       }
     }
 
-    function showWorkspace() {
-      const sess = getSession();
-      if (!sess) {
-        showLogin("Phiên đăng nhập chưa khởi tạo hoặc đã hết hạn (401).");
+    function restorePersistedMessage() {
+      const saved = safeStorage(() => sessionStorage.getItem(MESSAGE_STORAGE_KEY));
+      if (!saved) return;
+      try {
+        const parsed = JSON.parse(saved);
+        const remaining = (parsed.expiresAt || 0) - Date.now();
+        if (remaining > 0 && parsed.text) {
+          const message = $("action-message");
+          message.className = `message show ${parsed.type || "ok"}`;
+          message.textContent = parsed.text;
+          if (actionMessageTimer) clearTimeout(actionMessageTimer);
+          actionMessageTimer = setTimeout(clearMessage, remaining);
+        } else {
+          safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+        }
+      } catch (_) {
+        safeStorage(() => sessionStorage.removeItem(MESSAGE_STORAGE_KEY));
+      }
+    }
+
+    function connectionHint(error) {
+      return error instanceof TypeError
+        ? ` Hãy chắc chắn API (Uvicorn) đang chạy tại ${API_BASE}.`
+        : "";
+    }
+
+    /* ---------- Render ---------- */
+
+    function getSearchText(item) {
+      const factors = (item.contributing_factors || [])
+        .map(factor => [factor.factor, factor.value, factor.reason, factor.source_timestamp].join(" "))
+        .join(" ");
+      return normalizeSearch([
+        item.enquiry_id,
+        item.account_key,
+        item.cohort_id,
+        item.owner,
+        item.score_mode,
+        item.contract_due_date,
+        item.quarantine_reason,
+        item.unscored_reason,
+        item.allocation_type,
+        factors
+      ].join(" "));
+    }
+
+    function renderFactor(factor) {
+      const details = makeElement("details", "factor");
+      const summary = makeElement("summary");
+      summary.append(
+        makeElement("span", "", FACTOR_LABELS[factor.factor] || factor.factor || "Yếu tố"),
+        makeElement("strong", "factor-value", `+${factor.value ?? 0} pts`)
+      );
+      const detail = makeElement("div", "factor-detail");
+      if (factor.reason) detail.append(makeElement("div", "", factor.reason));
+      detail.append(makeElement(
+        "div",
+        "",
+        `${factor.source_timestamp_field || "Nguồn thời gian"} · ${formatTimestamp(factor.source_timestamp)}`
+      ));
+      details.append(summary, detail);
+      return details;
+    }
+
+    // Chỉ điền mã hồ sơ (không điền mã khách hàng) để tránh chặn nhầm cả khách hàng.
+    function setBlockTarget(item) {
+      $("enquiry-id").value = item.enquiry_id || "";
+      $("account-key").value = "";
+      document.querySelector(".block-panel").open = true;
+      $("block-reason").focus();
+    }
+
+    // PLPT-42: Mở modal xác thực review
+    function openReviewModal(item) {
+      activeEnquiryForAction = item.enquiry_id;
+      $("review-target-id").textContent = item.enquiry_id;
+      $("chk-permission").checked = false;
+      $("modal-review").classList.add("show");
+    }
+
+    // PLPT-42: Mở modal ghi đè thứ tự
+    function openOverrideModal(item) {
+      activeEnquiryForAction = item.enquiry_id;
+      $("override-target-id").textContent = item.enquiry_id;
+      $("select-reason-code").value = "CUSTOMER_URGENT_CALLBACK";
+      $("txt-justification").value = "";
+      $("override-error").style.display = "none";
+      $("modal-override").classList.add("show");
+    }
+
+    function renderItem(item) {
+      const article = makeElement("article", "lead-card");
+      if (item.is_overdue_2bd) {
+        article.classList.add("overdue");
+      }
+
+      const top = makeElement("div", "lead-top");
+      const main = makeElement("div", "lead-main");
+      const title = makeElement("h3", "lead-title");
+      title.append(makeElement("span", "", item.enquiry_id || "Không có mã hồ sơ"));
+      if (item.allocation_type === "MANDATORY") {
+        title.append(makeElement("span", "tier0", "Tier 0 · Bắt buộc"));
+      }
+      if (item.is_overdue_2bd) {
+        title.append(makeElement("span", "badge badge-danger", "⚠️ Quá hạn 2 ngày làm việc (Overdue)"));
+      }
+
+      const meta = makeElement("div", "lead-meta");
+      meta.append(
+        makeElement("span", "", `Cohort: ${item.cohort_id || "—"}`),
+        makeElement("span", "", `Owner: ${item.owner || "Chưa phân công"}`)
+      );
+      if (item.contract_due_date) {
+        meta.append(makeElement("span", "", `Hạn hợp đồng: ${formatDate(item.contract_due_date)}`));
+      }
+      if (item.quarantine_reason) {
+        meta.append(makeElement("span", "", `Lý do quarantine: ${item.quarantine_reason}`));
+      }
+      if (item.unscored_reason) {
+        meta.append(makeElement("span", "", item.unscored_reason));
+      }
+      main.append(title, meta);
+
+      const actions = makeElement("div", "lead-actions");
+      const rankBox = makeElement("div", "rank-box");
+      rankBox.append(
+        makeElement("span", "rank-label", "Model rank"),
+        makeElement("strong", "rank-value", item.model_rank == null ? "—" : `#${item.model_rank}`)
+      );
+      const scoreBox = makeElement("div", "score-box");
+      scoreBox.append(
+        makeElement("strong", "score-value", item.score == null ? "—" : String(item.score)),
+        makeElement("span", "score-unit", item.score_unit || "")
+      );
+      actions.append(rankBox, scoreBox);
+      if (item.final_work_order != null) {
+        actions.append(makeElement("span", "work-order", `Work order ${item.final_work_order}`));
+      }
+
+      // Nút tương tác PLPT-42 (Review & Override)
+      if (activeView === "Active") {
+        const btnGroup = makeElement("div", "card-buttons");
+        
+        const reviewBtn = makeElement("button", "btn btn-primary btn-sm", "Review");
+        reviewBtn.type = "button";
+        reviewBtn.addEventListener("click", () => openReviewModal(item));
+
+        const overrideBtn = makeElement("button", "btn btn-warning btn-sm", "Ghi đè");
+        overrideBtn.type = "button";
+        overrideBtn.addEventListener("click", () => openOverrideModal(item));
+
+        const blockButton = makeElement("button", "btn btn-danger btn-sm", "Chặn");
+        blockButton.type = "button";
+        blockButton.addEventListener("click", () => setBlockTarget(item));
+
+        btnGroup.append(reviewBtn, overrideBtn, blockButton);
+        actions.append(btnGroup);
+      }
+
+      top.append(main, actions);
+      article.append(top);
+
+      const factors = item.contributing_factors || [];
+      if (factors.length) {
+        const factorRow = makeElement("div", "factors");
+        factorRow.append(makeElement("span", "factors-label", "Yếu tố đóng góp:"));
+        factors.slice(0, 3).forEach(factor => factorRow.append(renderFactor(factor)));
+        article.append(factorRow);
+      }
+
+      const footer = makeElement("div", "lead-meta");
+      if (item.score_mode) footer.append(makeElement("span", "badge", item.score_mode));
+      if (item.allocation_type && item.allocation_type !== "MANDATORY") {
+        footer.append(makeElement("span", "badge", item.allocation_type));
+      }
+      if (footer.childNodes.length) {
+        footer.style.marginTop = "10px";
+        article.append(footer);
+      }
+      return article;
+    }
+
+    function renderQueue() {
+      const list = $("queue-list");
+      list.replaceChildren();
+      if (!currentPayload) return;
+
+      // Dữ liệu quá hạn: khóa Active Queue, không hiển thị hồ sơ nào.
+      if (activeView === "Active" && isStale(currentPayload)) {
+        const locked = makeElement("div", "empty-state");
+        locked.append(
+          makeElement("strong", "", "Active Queue đang bị khóa"),
+          makeElement("span", "", "Hãy làm mới dữ liệu nguồn rồi tải lại để tiếp tục.")
+        );
+        list.append(locked);
         return;
       }
-      document.getElementById("login-screen").style.display = "none";
-      document.getElementById("workspace-screen").style.display = "block";
-      document.getElementById("current-role").textContent = sess.role;
-      loadQueue();
+
+      const query = normalizeSearch($("search-input").value);
+      const items = (currentPayload.items || []).filter(item =>
+        !query || getSearchText(item).includes(query)
+      );
+      if (!items.length) {
+        const empty = makeElement("div", "empty-state");
+        const heading = activeView === "Active" && currentPayload.status === "NO_DAILY_SNAPSHOT"
+          ? "Chưa có snapshot queue hôm nay"
+          : `Không có hồ sơ trong ${VIEW_TITLES[activeView]}`;
+        empty.append(makeElement("strong", "", heading));
+        empty.append(makeElement(
+          "span",
+          "",
+          query ? "Thử từ khóa khác hoặc tìm bằng tiếng Việt không dấu." : "Dữ liệu sẽ xuất hiện khi có hồ sơ phù hợp."
+        ));
+        list.append(empty);
+        return;
+      }
+      items.forEach(item => list.append(renderItem(item)));
     }
 
-    function showMessage(type, text) {
-      const msgEl = document.getElementById("action-msg");
-      msgEl.className = `msg ${type}`;
-      msgEl.textContent = text;
+    function updateSummary(payload) {
+      const stale = isStale(payload);
+      $("stat-total").textContent = String(payload.total ?? 0);
+      $("stat-status").textContent = `${activeView} · ${payload.status || "—"}`;
+      $("stat-scheduled").textContent = String(payload.scheduled_today ?? 0);
+      $("stat-capacity").textContent = `Capacity K = ${payload.capacity_k ?? "—"}`;
+      $("stat-overdue-2bd").textContent = String(payload.overdue_2bd_count ?? 0);
+      $("stat-snapshot-age").textContent = formatSnapshotAge(payload.snapshot_age);
+      
+      const itemWithMode = (payload.items || []).find(item => item.score_mode);
+      $("stat-score-mode").textContent = payload.scoring_mode || itemWithMode?.score_mode || "—";
+      const fbBadge = $("fallback-badge");
+      if (fbBadge) {
+        const fbReason = payload.fallback_reason || (payload.route && payload.route.fallback_reason);
+        if (fbReason) {
+          $("fallback-reason").textContent = fbReason;
+          fbBadge.style.display = "inline-block";
+        } else {
+          fbBadge.style.display = "none";
+        }
+      }
+      $("status-badge").textContent = payload.status || "—";
+      const badgeState = stale || payload.status === "QUARANTINE_SOURCE_UNAVAILABLE"
+        ? "badge-hold"
+        : payload.status === "CAPACITY_EXCEEDED"
+          ? "badge-warn"
+          : "badge-ok";
+      $("status-badge").className = `badge ${badgeState}`;
+      $("count-active").textContent = activeView === "Active" ? String(payload.total ?? 0) : "—";
+      $("count-unscored").textContent = activeView === "Unscored" ? String(payload.total ?? 0) : "—";
+      $("count-quarantine").textContent = activeView === "Quarantine" ? String(payload.total ?? 0) : "—";
+      $("create-snapshot").hidden = !(
+        activeView === "Active" && payload.status === "NO_DAILY_SNAPSHOT"
+      );
+
+      // Cảnh báo quá tải (Queue Overload Banner)
+      const overloadBanner = $("overload-banner");
+      if (payload.is_overloaded) {
+        overloadBanner.classList.add("show");
+      } else {
+        overloadBanner.classList.remove("show");
+      }
+
+      const banner = $("stale-banner");
+      banner.classList.toggle("show", stale);
+      banner.textContent = stale ? (payload.warning || DEFAULT_STALE_WARNING) : "";
+      const viewNote = $("view-note");
+      if (activeView === "Unscored" && payload.classification_basis) {
+        viewNote.textContent = `Phân loại hiện tại: ${payload.classification_basis}.`;
+        viewNote.hidden = false;
+      } else if (activeView === "Quarantine" && payload.view_source_available === false) {
+        viewNote.textContent = "Không tìm thấy nguồn dữ liệu quarantine.";
+        viewNote.hidden = false;
+      } else {
+        viewNote.textContent = "";
+        viewNote.hidden = true;
+      }
     }
 
-    async function apiFetch(path, options = {}) {
-      const sess = getSession();
-      if (!sess) {
-        showLogin("Phiên đăng nhập không hợp lệ (401).");
-        throw new Error("Unauthorized");
+    // Dùng hồ sơ đầu tiên làm ví dụ trong placeholder (khi ô còn trống).
+    function updateBlockPlaceholders(payload) {
+      const first = (payload.items || [])[0];
+      if (!first) return;
+      if (first.enquiry_id && !$("enquiry-id").value) {
+        $("enquiry-id").placeholder = `Ví dụ: ${first.enquiry_id}`;
       }
-      const headers = {
-        "Content-Type": "application/json",
-        "X-User-Role": sess.role,
-        "X-User-Id": sess.userId,
-        ...(options.headers || {}),
-      };
-      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-      if (res.status === 401) {
-        sessionStorage.removeItem("sn_role");
-        showLogin("Phiên đã hết hạn hoặc truy cập trái phép (HTTP 401). Vui lòng đăng nhập lại.");
-        throw new Error("HTTP 401");
+      if (first.account_key && !$("account-key").value) {
+        $("account-key").placeholder = `Ví dụ: ${first.account_key}`;
       }
-      return res;
     }
+
+    /* ---------- API ---------- */
 
     async function loadQueue() {
-      const qVal = document.getElementById("search-query").value.trim();
-      const incOverflow = document.getElementById("overflow-toggle").value === "true";
-      const params = new URLSearchParams({ view: currentView, page: "1", limit: incOverflow ? "500" : "50", include_overflow: String(incOverflow) });
-      if (qVal) params.set("q", qVal);
+      const requestId = ++queueRequestId;
+      $("status-badge").textContent = "Đang tải...";
+      try {
+        const url = `${API_BASE}/api/v1/workspace/queue?view=${encodeURIComponent(activeView)}&limit=${API_LIMIT}`;
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        if (requestId !== queueRequestId) return;
+        currentPayload = payload;
+        updateSummary(payload);
+        updateBlockPlaceholders(payload);
+        renderQueue();
+      } catch (error) {
+        if (requestId !== queueRequestId) return;
+        currentPayload = null;
+        $("queue-list").replaceChildren();
+        $("status-badge").textContent = "Lỗi kết nối";
+        $("status-badge").className = "badge badge-hold";
+        showMessage("err", `Không tải được Sales Workspace: ${error.message}.${connectionHint(error)}`);
+      }
+    }
+
+    async function createDailySnapshot() {
+      const button = $("create-snapshot");
+      button.disabled = true;
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/workspace/queue/daily`, {
+          method: "POST"
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+        if (isStale(payload)) {
+          await loadQueue();
+          showMessage("err", payload.warning || DEFAULT_STALE_WARNING);
+          return;
+        }
+        showMessage("ok", "Đã tạo snapshot queue hôm nay.", 2500);
+        await loadQueue();
+      } catch (error) {
+        showMessage("err", `Không tạo được snapshot: ${error.message}.${connectionHint(error)}`);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function submitBlock(event) {
+      event.preventDefault();
+      const enquiry_id = $("enquiry-id").value.trim();
+      const account_key = $("account-key").value.trim();
+      const reason = $("block-reason").value.trim();
+      if (!enquiry_id && !account_key) {
+        showMessage("err", "Vui lòng nhập mã hồ sơ (SN-...) hoặc mã khách hàng (ACCT-...).");
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE}/api/block`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enquiry_id, account_key, reason })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        const target = [result.enquiry_id, result.account_key].filter(Boolean).join(" / ");
+        showMessage(
+          "ok",
+          `Đã chặn thành công${target ? `: ${target}` : ""} — hồ sơ được loại khỏi Active Queue.`,
+          2500
+        );
+        $("enquiry-id").value = "";
+        $("account-key").value = "";
+        await loadQueue();
+      } catch (error) {
+        showMessage("err", `Chặn hồ sơ thất bại: ${error.message}.${connectionHint(error)}`);
+      }
+    }
+
+    // Xử lý API Review (PLPT-42 / USR 07)
+    async function handleConfirmReview() {
+      const verified = $("chk-permission").checked;
+      if (!verified) {
+        alert("Bạn phải xác nhận quyền liên hệ (contact_permission_verified = TRUE) trước khi thực hiện review!");
+        return;
+      }
 
       try {
-        const res = await apiFetch(`/api/v1/workspace/queue?${params.toString()}`);
-        const data = await res.json();
-        if (!res.ok) {
-          showMessage("err", data.detail || "Không tải được hàng đợi.");
-          return;
-        }
-
-        document.getElementById("scoring-mode").textContent = data.scoring_mode || "RULES_BASELINE";
-        const fbBadge = document.getElementById("fallback-badge");
-        if (fbBadge) {
-          if (data.fallback_reason) {
-            document.getElementById("fallback-reason").textContent = data.fallback_reason;
-            fbBadge.style.display = "inline-block";
-          } else {
-            fbBadge.style.display = "none";
-          }
-        }
-        document.getElementById("cohort-id").textContent = data.cohort_id || "-";
-        document.getElementById("capacity-k").textContent = data.capacity_k ?? 25;
-        document.getElementById("explore-count").textContent = data.exploration_slots_allocated ?? 0;
-        document.getElementById("overdue-count").textContent = data.overdue_2bd_count ?? 0;
-        document.getElementById("quarantine-count").textContent = data.quarantine_count ?? 0;
-        const ageHours = data.snapshot_age_hours;
-        document.getElementById("age-hours").textContent = ageHours == null ? "Chưa xác định" : `${Number(ageHours).toFixed(1)} giờ`;
-
-        const badge = document.getElementById("status-badge");
-        const staleBanner = document.getElementById("stale-banner");
-        const overloadBanner = document.getElementById("overload-banner");
-        const queueCard = document.getElementById("queue-card");
-        const isHeld = data.status === "HOLD_STALE_DATA" || data.locked === true;
-
-        badge.textContent = data.status;
-        badge.className = `badge ${isHeld ? "badge-hold" : "badge-ok"}`;
-
-        if (data.is_overloaded) {
-          overloadBanner.style.display = "block";
-          overloadBanner.textContent = "CẢNH BÁO QUÁ TẢI: Số lượng hồ sơ TIER_0 hoặc quá hạn 2 ngày làm việc vượt công suất K.";
-        } else {
-          overloadBanner.style.display = "none";
-        }
-
-        if (isHeld && currentView !== "quarantine") {
-          staleBanner.style.display = "block";
-          staleBanner.textContent = data.warning || "HOLD_STALE_DATA: Dữ liệu nguồn quá 24 giờ.";
-          queueCard.style.display = "none";
-          return;
-        }
-
-        staleBanner.style.display = "none";
-        queueCard.style.display = "block";
-
-        const tbody = document.getElementById("queue-body");
-        tbody.replaceChildren();
-
-        const items = data.items || [];
-        const sess = getSession();
-        const agingPanel = document.getElementById("supervisor-aging-panel");
-        const agingList = document.getElementById("supervisor-aging-list");
-        const overdueItems = items.filter((x) => x.is_overdue_2bd);
-        if (sess && (sess.role === "SUPERVISOR" || sess.role === "ADMINISTRATOR") && overdueItems.length > 0) {
-          agingPanel.style.display = "block";
-          agingList.textContent = overdueItems.map((x) => `${x.enquiry_id} (${x.account_key})`).join(", ");
-        } else {
-          agingPanel.style.display = "none";
-        }
-        for (const row of items) {
-          const tr = document.createElement("tr");
-
-          if (currentView === "quarantine") {
-            const tdQ = document.createElement("td");
-            tdQ.colSpan = 8;
-            tdQ.textContent = `${row.enquiry_id || "(no-id)"} | ${row.quarantine_source || ""} | Lý do: ${row.quarantine_reason || ""}`;
-            tr.appendChild(tdQ);
-            tbody.appendChild(tr);
-            continue;
-          }
-
-          const tdModelRank = document.createElement("td");
-          tdModelRank.textContent = `#${row.model_rank}`;
-
-          const tdWorkOrder = document.createElement("td");
-          const strongOrder = document.createElement("strong");
-          strongOrder.textContent = `#${row.final_work_order}`;
-          tdWorkOrder.appendChild(strongOrder);
-          if (row.allocation_type === "EXPLORATION_10PCT" || row.allocation_type === "OVERFLOW_OUTSIDE_K" || row.allocation_type === "OVERRIDE_PROMOTED") {
-            const expTag = document.createElement("div");
-            expTag.className = row.allocation_type === "OVERFLOW_OUTSIDE_K" ? "badge badge-warn" : "badge badge-info";
-            expTag.textContent = row.allocation_type === "OVERFLOW_OUTSIDE_K" ? "OVERFLOW_OUTSIDE_K (Ngoài Top-K)" : row.allocation_type;
-            tdWorkOrder.appendChild(expTag);
-          }
-
-          const tdCohortOwner = document.createElement("td");
-          tdCohortOwner.textContent = `${row.cohort_id || "-"} / ${row.owner || "Sales Team"}`;
-
-          const tdLead = document.createElement("td");
-          const leadIdEl = document.createElement("strong");
-          leadIdEl.textContent = String(row.enquiry_id || "");
-          const acctEl = document.createElement("div");
-          acctEl.textContent = String(row.account_key || "");
-          const prodEl = document.createElement("div");
-          prodEl.style.color = "#475569";
-          prodEl.textContent = String(row.product_family || "");
-          tdLead.append(leadIdEl, acctEl, prodEl);
-          if (row.spec_completeness === "Minimal") {
-            const minBadge = document.createElement("span");
-            minBadge.className = "badge badge-warn";
-            minBadge.textContent = "Minimal spec";
-            tdLead.appendChild(minBadge);
-          }
-
-          const tdScore = document.createElement("td");
-          // Tuyệt đối không gắn dấu % vào điểm
-          const scoreStrong = document.createElement("strong");
-          scoreStrong.textContent = String(row.rule_score ?? "");
-          const scoreUnit = document.createTextNode(" điểm");
-          const modeBr = document.createElement("br");
-          const modeSpan = document.createElement("span");
-          modeSpan.className = "badge badge-info";
-          modeSpan.textContent = String(row.scoring_mode || "RULES_BASELINE");
-          tdScore.append(scoreStrong, scoreUnit, modeBr, modeSpan);
-
-          const tdSla = document.createElement("td");
-          tdSla.textContent = `Tuổi snapshot: ${row.snapshot_age_hours ?? "-"}h | SLA: ${row.sla_due_timestamp || "-"}`;
-          if (row.is_urgent) {
-            const sp = document.createElement("span");
-            sp.className = "tier0";
-            sp.textContent = "TIER 0";
-            tdSla.appendChild(document.createElement("br"));
-            tdSla.appendChild(sp);
-          }
-          if (row.is_overdue_2bd) {
-            const sp2 = document.createElement("span");
-            sp2.className = "overdue";
-            sp2.textContent = "QUÁ HẠN 2BD";
-            tdSla.appendChild(document.createElement("br"));
-            tdSla.appendChild(sp2);
-          }
-
-          const tdFactors = document.createElement("td");
-          const factors = row.contributing_factors || (row.reasons || []).map(r => ({ factor: r, source_timestamp: row.t0_time }));
-          for (const f of factors.slice(0, 3)) {
-            const d = document.createElement("div");
-            d.textContent = `• ${f.factor}`;
-            const ts = document.createElement("div");
-            ts.className = "factor-ts";
-            ts.textContent = `Nguồn t0: ${f.source_timestamp || row.t0_time || "-"}`;
-            tdFactors.append(d, ts);
-          }
-          const noteEl = document.createElement("div");
-          noteEl.className = "factor-ts";
-          noteEl.textContent = row.non_causal_disclaimer || "Điểm ưu tiên chỉ mang tính hỗ trợ sắp xếp, không phải xác suất thắng đơn hay quan hệ nhân quả.";
-          tdFactors.appendChild(noteEl);
-
-          const tdAction = document.createElement("td");
-          const consentLabel = document.createElement("label");
-          consentLabel.className = "consent-box";
-          const consentCb = document.createElement("input");
-          consentCb.type = "checkbox";
-          consentLabel.append(consentCb, document.createTextNode("Đã xác minh quyền liên hệ hợp pháp"));
-
-          const btnAccept = document.createElement("button");
-          btnAccept.type = "button";
-          btnAccept.className = "btn-primary btn-sm";
-          btnAccept.textContent = "ACCEPT";
-          btnAccept.disabled = true;
-
-          const btnOverride = document.createElement("button");
-          btnOverride.type = "button";
-          btnOverride.className = "btn-secondary btn-sm";
-          btnOverride.textContent = "OVERRIDE";
-          btnOverride.disabled = true;
-
-          consentCb.addEventListener("change", () => {
-            btnAccept.disabled = !consentCb.checked;
-            btnOverride.disabled = !consentCb.checked;
-          });
-
-          btnAccept.addEventListener("click", async () => {
-            if (!consentCb.checked) {
-              showMessage("err", "Vui lòng tick xác nhận quyền liên hệ hợp pháp trước khi ACCEPT.");
-              return;
-            }
-            const resAcc = await apiFetch("/api/v1/workspace/review", {
-              method: "POST",
-              body: JSON.stringify({
-                enquiry_id: row.enquiry_id,
-                decision_type: "ACCEPT_PRIORITY",
-                contact_permission_verified: consentCb.checked,
-                contact_attempted: consentCb.checked,
-                review_completed: true,
-              }),
-            });
-            const bodyAcc = await resAcc.json();
-            showMessage(resAcc.ok ? "ok" : "err", resAcc.ok ? `Đã ghi nhận ACCEPT_PRIORITY cho ${row.enquiry_id}` : (bodyAcc.detail || "Lỗi"));
-            if (resAcc.ok) loadQueue();
-          });
-
-          btnOverride.addEventListener("click", () => {
-            if (!consentCb.checked) {
-              showMessage("err", "Vui lòng tick xác nhận quyền liên hệ hợp pháp trước khi OVERRIDE.");
-              return;
-            }
-            openOverrideModal(row.enquiry_id);
-          });
-
-          tdAction.append(consentLabel, btnAccept, document.createTextNode(" "), btnOverride);
-          tr.append(tdModelRank, tdWorkOrder, tdCohortOwner, tdLead, tdScore, tdSla, tdFactors, tdAction);
-          tbody.appendChild(tr);
-        }
-      } catch (err) {
-        if (String(err.message) !== "HTTP 401" && String(err.message) !== "Unauthorized") {
-          showMessage("err", "Không kết nối được API tại http://127.0.0.1:8000.");
-        }
+        const response = await fetch(`${API_BASE}/api/v1/workspace/review`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enquiry_id: activeEnquiryForAction,
+            decision_type: "ACCEPT_PRIORITY",
+            contact_permission_verified: true,
+            contact_attempted: true,
+            review_completed: true,
+            next_step_note: "Xác nhận review và outreach qua UI Workspace"
+          })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        $("modal-review").classList.remove("show");
+        showMessage("ok", `Đã ghi nhận review thành công cho ${activeEnquiryForAction}`, 2500);
+        await loadQueue();
+      } catch (error) {
+        alert("Lỗi review: " + error.message);
       }
     }
 
-    async function submitBlock() {
-      const enquiry_id = document.getElementById("enquiry_id").value.trim();
-      const account_key = document.getElementById("account_key").value.trim();
-      const reason = document.getElementById("reason").value.trim();
-      if (!enquiry_id && !account_key) {
-        showMessage("err", "Vui lòng nhập enquiry_id hoặc account_key.");
+    // Xử lý API Override (PLPT-42 / USR 04)
+    async function handleConfirmOverride() {
+      const reasonCode = $("select-reason-code").value;
+      const justification = $("txt-justification").value.trim();
+      const errorSpan = $("override-error");
+
+      if (!justification) {
+        errorSpan.style.display = "block";
         return;
       }
-      const res = await apiFetch("/api/block", {
-        method: "POST",
-        body: JSON.stringify({ enquiry_id, account_key, reason }),
-      });
-      const result = await res.json();
-      if (!res.ok) {
-        showMessage("err", result.detail || "Chặn thất bại.");
-        return;
+      errorSpan.style.display = "none";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/workspace/override`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enquiry_id: activeEnquiryForAction,
+            override_reason_code: reasonCode,
+            justification: justification
+          })
+        });
+        const result = await response.json();
+        if (response.status === 400) {
+          alert("Từ chối (HTTP 400): " + (result.detail || "Thiếu lý do ghi đè"));
+          return;
+        }
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+
+        $("modal-override").classList.remove("show");
+        showMessage("ok", `Đã ghi đè thứ tự cho ${activeEnquiryForAction} và lưu vào telemetry`, 2500);
+        await loadQueue();
+      } catch (error) {
+        alert("Lỗi ghi đè: " + error.message);
       }
-      showMessage("ok", `Đã chặn thành công: ${result.enquiry_id || result.account_key}`);
-      loadQueue();
     }
 
-    document.getElementById("btn-login").addEventListener("click", () => {
-      sessionStorage.setItem("sn_role", document.getElementById("login-role").value);
-      sessionStorage.setItem("sn_user_id", document.getElementById("login-userid").value.trim() || "sales_01");
-      sessionStorage.removeItem("sn_expired");
-      showWorkspace();
-    });
-    document.getElementById("btn-logout").addEventListener("click", () => {
-      sessionStorage.removeItem("sn_role");
-      showLogin("Đã đăng xuất.");
-    });
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        currentView = btn.dataset.view;
+    // Event Listeners cho Modals PLPT-42
+    $("btn-cancel-review").addEventListener("click", () => $("modal-review").classList.remove("show"));
+    $("btn-submit-review").addEventListener("click", handleConfirmReview);
+    $("btn-cancel-override").addEventListener("click", () => $("modal-override").classList.remove("show"));
+    $("btn-submit-override").addEventListener("click", handleConfirmOverride);
+
+    /* ---------- Sự kiện ---------- */
+
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        activeView = tab.dataset.view;
+        document.querySelectorAll(".tab").forEach(candidate => {
+          candidate.setAttribute("aria-selected", String(candidate === tab));
+        });
+        $("workspace-title").textContent = VIEW_TITLES[activeView];
+        $("queue-panel").setAttribute("aria-labelledby", tab.id);
+        $("workspace-copy").textContent = activeView === "Active"
+          ? "Hồ sơ đã chấm điểm; hồ sơ deferred vẫn được giữ lại và có thể tìm kiếm."
+          : activeView === "Unscored"
+            ? "Hồ sơ chưa có kết quả scoring trong snapshot queue hiện tại."
+            : "Hồ sơ bị cách ly khi kiểm tra dữ liệu, kèm lý do nếu có.";
+        $("search-input").value = "";
+        currentPayload = null;
+        renderQueue();
         loadQueue();
       });
     });
-    document.getElementById("btn-search").addEventListener("click", loadQueue);
-    document.getElementById("overflow-toggle").addEventListener("change", loadQueue);
-    document.getElementById("btn-refresh").addEventListener("click", loadQueue);
-    document.getElementById("btn-submit-block").addEventListener("click", submitBlock);
 
-    let pendingOverrideEnqId = "";
-    function openOverrideModal(enqId) {
-      pendingOverrideEnqId = enqId;
-      document.getElementById("ov-enquiry-label").textContent = enqId;
-      document.getElementById("override-justification").value = "";
-      document.getElementById("override-modal").style.display = "flex";
+    $("search-input").addEventListener("input", renderQueue);
+    $("refresh").addEventListener("click", loadQueue);
+    $("create-snapshot").addEventListener("click", createDailySnapshot);
+    $("block-form").addEventListener("submit", submitBlock);
+
+    restorePersistedMessage();
+    loadQueue();
+  </script>
+
+    <script>
+    const MONITORING_ROLES = new Set(["MODEL_REVIEWER", "DATA_STEWARD", "SUPERVISOR", "ADMINISTRATOR"]);
+
+    function syncMonitoringTabVisibility() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const monTab = document.getElementById("tab-monitoring");
+      if (monTab) {
+        monTab.style.display = MONITORING_ROLES.has(currentRole) ? "" : "none";
+      }
     }
-    document.getElementById("btn-ov-cancel").addEventListener("click", () => {
-      document.getElementById("override-modal").style.display = "none";
+
+    async function loadMonitoringDrift() {
+      const roleSelect = document.getElementById("role-select") || document.getElementById("user-role");
+      const currentRole = (roleSelect ? roleSelect.value : (localStorage.getItem("user_role") || "MODEL_REVIEWER")).toUpperCase();
+      const userId = localStorage.getItem("user_id") || "reviewer_01";
+
+      try {
+        const res = await fetch("/api/v1/monitoring/drift", {
+          headers: {
+            "X-User-Role": currentRole,
+            "X-User-Id": userId
+          }
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const snap = data.daily_snapshot || {};
+
+        document.getElementById("mon-maturity-status").textContent =
+          data.accuracy_assessment_status || "DEFERRED_UNTIL_60D_MATURITY";
+        document.getElementById("mon-retrain-flag").textContent =
+          data.auto_retrain_enabled ? "ENABLED" : "DISABLED (auto_retrain_enabled = false)";
+
+        document.getElementById("mon-daily-volume").textContent = snap.daily_volume ?? 0;
+        const cov = Number(snap.score_coverage_pct ?? 0);
+        document.getElementById("mon-coverage-pct").textContent = cov.toFixed(2) + "%";
+        const bar = document.getElementById("mon-coverage-bar");
+        bar.style.width = Math.min(Math.max(cov, 0), 100) + "%";
+        bar.style.background = cov < 90.0 ? "#dc2626" : "#16a34a";
+
+        const alerts = data.alerts || [];
+        document.getElementById("count-monitoring-alerts").textContent = alerts.length;
+        const banner = document.getElementById("drift-alert-banner");
+        const alertList = document.getElementById("drift-alert-list");
+        alertList.innerHTML = "";
+        if (alerts.length > 0) {
+          banner.hidden = false;
+          alerts.forEach(a => {
+            const li = document.createElement("li");
+            li.textContent = `[${a.spec_code || a.code}] ${a.message}`;
+            alertList.appendChild(li);
+          });
+        } else {
+          banner.hidden = true;
+        }
+
+        const tbody = document.getElementById("mon-missingness-tbody");
+        tbody.innerHTML = "";
+        const rows = snap.missingness_table || [];
+        if (rows.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#64748b;">Chưa có dữ liệu feature trong ngày.</td></tr>';
+        } else {
+          rows.forEach(r => {
+            const delta = Number(r.delta_pp ?? 0);
+            const isBreach = delta >= 10.0;
+            const tr = document.createElement("tr");
+            tr.style.borderBottom = "1px solid #e2e8f0";
+            if (isBreach) {
+              tr.style.backgroundColor = "#fee2e2";
+              tr.style.color = "#991b1b";
+              tr.style.fontWeight = "700";
+            }
+            tr.innerHTML = `
+              <td style="padding:10px;">${r.feature}</td>
+              <td style="padding:10px;">${Number(r.baseline_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${Number(r.current_missing_pct ?? 0).toFixed(2)}%</td>
+              <td style="padding:10px;">${delta >= 0 ? "+" + delta.toFixed(2) : delta.toFixed(2)} pp</td>
+              <td style="padding:10px;">${isBreach ? "🚨 VƯỢT NGƯỠNG (>= 10 pp)" : "Bình thường"}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load monitoring drift:", err);
+      }
+    }
+
+    document.getElementById("btn-reload-drift")?.addEventListener("click", loadMonitoringDrift);
+    syncMonitoringTabVisibility();
+    loadMonitoringDrift();
+  </script>
+<!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->
+<!-- PLPT-69: Triage Duration, Exposure vs Outcome Separation & Effort Report -->
+<section id="plpt69-pilot-panel" style="margin:24px 0;padding:16px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h3 style="margin:0 0 4px 0;">Pilot Telemetry &amp; Effort Reduction Report (PLPT-69)</h3>
+      <small id="plpt69-status-note" style="color:#475569;">M?c ti?u: &ge; 20 ng?y l?m vi?c VN, gi?m c?ng s?c &ge; 20%, 0 xung ??t account_key, t?ch bi?t exposure_logs &amp; outcome_events.</small>
+    </div>
+    <button id="btn-plpt69-refresh" type="button" style="padding:6px 12px;cursor:pointer;">C?p nh?t b?o c?o Pilot</button>
+  </div>
+
+  <div id="plpt69-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:12px;">
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Ng?y l?m vi?c VN</div>
+      <div id="m-bdays" style="font-size:18px;font-weight:700;">- / 20</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Gi?m c?ng s?c (%)</div>
+      <div id="m-effort-red" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Ph?t / h? s? (Pilot vs Base)</div>
+      <div id="m-min-per-enq" style="font-size:16px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">??ng h?n SLA (%)</div>
+      <div id="m-sla" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <div style="font-size:12px;color:#64748b;">Xung ??t Account</div>
+      <div id="m-conflicts" style="font-size:18px;font-weight:700;">-</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <strong>exposure_logs (Hi?n th? ph?n lo?i)</strong>
+      <div style="font-size:12px;color:#64748b;">L?u rank, score_mode, reasons l?c ph?i b?y; t?ch bi?t outcome_events.</div>
+      <div id="plpt69-exposure-count" style="margin-top:6px;font-weight:600;">?? ghi: 0 b?n ghi</div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="plpt69-enq-input" type="text" placeholder="enquiry_id (vd: SN-0001)" style="padding:4px 8px;flex:1;min-width:140px;" />
+        <input id="plpt69-acct-input" type="text" placeholder="account_key (vd: ACCT-01)" style="padding:4px 8px;flex:1;min-width:140px;" />
+        <button id="btn-plpt69-log-triage" type="button" style="padding:5px 10px;cursor:pointer;">Ghi nh?n triage_duration_seconds</button>
+      </div>
+    </div>
+
+    <div style="background:#fff;padding:10px;border:1px solid #e2e8f0;border-radius:6px;">
+      <strong>outcome_events (T?ch bi?t ho?n to?n)</strong>
+      <div style="font-size:12px;color:#64748b;">Nh?n tr??ng th?nh sau 60 ng?y d??ng l?ch ? kh?ng tr?n v?i exposure_logs / override_logs.</div>
+      <div id="plpt69-outcome-count" style="margin-top:6px;font-weight:600;">?? ghi: 0 s? ki?n</div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="plpt69-outcome-enq" type="text" placeholder="enquiry_id cho outcome_events" style="padding:4px 8px;flex:1;min-width:160px;" />
+        <button id="btn-plpt69-record-outcome" type="button" style="padding:5px 10px;cursor:pointer;">Ghi outcome_event (60d)</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const triageStartMap = {};
+  const exposureLogs = [];
+  const outcomeEvents = [];
+
+  function markTriageStart(enquiryId) {
+    if (!enquiryId) return;
+    if (!triageStartMap[enquiryId]) {
+      triageStartMap[enquiryId] = performance.now();
+    }
+  }
+
+  function consumeTriageDurationSeconds(enquiryId) {
+    const start = triageStartMap[enquiryId];
+    if (typeof start !== "number") return 1.0;
+    delete triageStartMap[enquiryId];
+    return Math.max(0.1, Number(((performance.now() - start) / 1000).toFixed(2)));
+  }
+
+  function recordExposureBatch(items) {
+    if (!Array.isArray(items)) return;
+    const exposedAt = new Date().toISOString();
+    items.forEach((it, idx) => {
+      const enqId = it.enquiry_id || it.id || "";
+      if (enqId) markTriageStart(enqId);
+      exposureLogs.push({
+        stream: "exposure_logs",
+        enquiry_id: enqId,
+        rank: it.final_rank ?? it.rank ?? (idx + 1),
+        score_mode: it.score_mode || "RULES_FALLBACK",
+        reasons: it.reasons || [],
+        exposed_at: exposedAt,
+        isolated_from_outcome_events: true,
+      });
     });
-    document.getElementById("btn-ov-submit").addEventListener("click", async () => {
-      const code = document.getElementById("override-reason-code").value;
-      const just = document.getElementById("override-justification").value.trim();
-      if (!just) {
-        showMessage("err", "Giải trình nghiệp vụ không được để trống.");
+    const el = document.getElementById("plpt69-exposure-count");
+    if (el) el.textContent = `?? ghi: ${exposureLogs.length} b?n ghi`;
+  }
+
+  function recordOutcomeEvent(enquiryId, maturityDays = 60) {
+    if (!enquiryId) return;
+    outcomeEvents.push({
+      stream: "outcome_events",
+      enquiry_id: enquiryId,
+      maturity_window_days: maturityDays,
+      recorded_at: new Date().toISOString(),
+      isolated_from_exposure_logs: true,
+      isolated_from_override_logs: true,
+    });
+    const el = document.getElementById("plpt69-outcome-count");
+    if (el) el.textContent = `?? ghi: ${outcomeEvents.length} s? ki?n`;
+  }
+
+  async function refreshPilotTelemetry() {
+    try {
+      const fetcher = typeof apiFetch === "function" ? apiFetch : fetch;
+      const res = await fetcher("/api/v1/pilot/telemetry");
+      if (!res.ok) {
+        const note = document.getElementById("plpt69-status-note");
+        if (note) note.textContent = `Telemetry y?u c?u vai tr? SUPERVISOR/MODEL_REVIEWER/ADMINISTRATOR (HTTP ${res.status}).`;
         return;
       }
-      const resOv = await apiFetch("/api/v1/workspace/override", {
+      const data = await res.json();
+      const bdays = Number(data.business_days_elapsed ?? 0);
+      const redPct = Number(data.effort_reduction_pct ?? 0);
+      const pilotMin = Number(data.pilot_minutes_per_enquiry ?? 0);
+      const baseMin = Number(data.baseline_minutes_per_enquiry ?? 6.0);
+      const slaPct = Number(data.on_time_sla_rate_pct ?? 0);
+      const conflicts = Number(data.account_assignment_conflict_count ?? 0);
+
+      document.getElementById("m-bdays").textContent = `${bdays} / 20`;
+      const redEl = document.getElementById("m-effort-red");
+      redEl.textContent = `${redPct.toFixed(1)}% (${redPct >= 20 ? "??T >=20%" : "CH?A ??T >=20%"})`;
+      document.getElementById("m-min-per-enq").textContent = `${pilotMin.toFixed(2)}m vs ${baseMin.toFixed(2)}m`;
+      document.getElementById("m-sla").textContent = `${slaPct.toFixed(1)}%`;
+      document.getElementById("m-conflicts").textContent = String(conflicts);
+    } catch (_) {
+      // B? qua n?u ch?a b?t server ? ch? ?? static
+    }
+  }
+
+  if (typeof window.fetch === "function") {
+    const origFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      const resp = await origFetch(input, init);
+      if (url.includes("/api/v1/workspace/queue") && resp.ok) {
+        try {
+          const clone = resp.clone();
+          const json = await clone.json();
+          if (Array.isArray(json.items)) recordExposureBatch(json.items);
+        } catch (_) {}
+      }
+      return resp;
+    };
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("btn-plpt69-refresh")?.addEventListener("click", refreshPilotTelemetry);
+    document.getElementById("btn-plpt69-log-triage")?.addEventListener("click", async () => {
+      const enqId = (document.getElementById("plpt69-enq-input")?.value || "").trim();
+      const acctKey = (document.getElementById("plpt69-acct-input")?.value || "").trim();
+      const durationSec = consumeTriageDurationSeconds(enqId || "__manual__");
+      const fetcher = typeof apiFetch === "function" ? apiFetch : fetch;
+      const res = await fetcher("/api/v1/pilot/effort", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          enquiry_id: pendingOverrideEnqId,
-          override_reason_code: code,
-          justification: just,
+          enquiries_reviewed: 1,
+          triage_duration_seconds: durationSec,
+          account_key: acctKey || undefined,
         }),
       });
-      const bodyOv = await resOv.json();
-      document.getElementById("override-modal").style.display = "none";
-      showMessage(resOv.ok ? "ok" : "err", resOv.ok ? `Đã ghi staff_override_logs (${code}) cho ${pendingOverrideEnqId}` : (bodyOv.detail || "Lỗi"));
-      if (resOv.ok) loadQueue();
+      if (typeof showMessage === "function") {
+        showMessage(res.ok ? "ok" : "err", res.ok ? `?? ghi triage_duration_seconds=${durationSec}s` : "L?i ghi effort");
+      }
+      refreshPilotTelemetry();
     });
+    document.getElementById("btn-plpt69-record-outcome")?.addEventListener("click", () => {
+      const enqId = (document.getElementById("plpt69-outcome-enq")?.value || "").trim() || "UNSPECIFIED";
+      recordOutcomeEvent(enqId, 60);
+      if (typeof showMessage === "function") {
+        showMessage("ok", `?? ghi outcome_event (60d) t?ch bi?t cho ${enqId}`);
+      }
+    });
+    refreshPilotTelemetry();
+  });
 
-    showWorkspace();
-  </script>
+  window.PLPT69_TELEMETRY = {
+    markTriageStart,
+    consumeTriageDurationSeconds,
+    recordExposureBatch,
+    recordOutcomeEvent,
+    getExposureLogs: () => exposureLogs.slice(),
+    getOutcomeEvents: () => outcomeEvents.slice(),
+    refreshPilotTelemetry,
+  };
+})();
+</script>
+
 </body>
 </html>

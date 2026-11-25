@@ -19,6 +19,8 @@ VALID_ROLES = {
     "DATA_STEWARD",
     "MODEL_REVIEWER",
     "ADMINISTRATOR",
+    "STAFF",
+    "PO_OPERATOR",
 }
 
 

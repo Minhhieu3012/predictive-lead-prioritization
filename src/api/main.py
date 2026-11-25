@@ -1,21 +1,32 @@
-"""PLPT-16, PLPT-17, PLPT-24 & PLPT-25: FastAPI Queue, Block, Workspace & RBAC API."""
+"""SongNhat AI-02 Predictive Lead Prioritization API."""
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import contextlib
+import csv
+import json
 import os
-import sqlite3
 from pathlib import Path
-from typing import Any
+import sqlite3
+from typing import Any, Literal
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.rules.rules_engine import RULES_LABEL, build_queue
+from src.rules.rules_engine import RULES_LABEL, _parse_datetime, build_queue
+from src.queue_allocation import (
+    MAX_SEED,
+    configured_capacity_k,
+    get_daily_allocation,
+    get_or_create_daily_allocation,
+    rank_enquiries_by_cohort,
+)
+from src.rules.vietnamese_business_calendar import is_overdue_after_business_days
 from src.models.serving_router import (
     DEFAULT_SERVING_MODE,
     FALLBACK_SERVING_MODE,
     PREDICTIVE_SERVING_MODE,
     ServingRouteDecision,
+    get_active_scoring_mode,
     get_manual_fallback_state,
     get_serving_health,
     reset_manual_fallback,
@@ -27,25 +38,25 @@ from src.models.train_candidates import get_registered_model, list_registered_mo
 from src.services.queue_service import (
     STALE_HOLD_HOURS,
     STALE_STATUS,
-    VN_TZ,
     WorkspaceActionError,
     build_workspace_queue_payload,
     count_quarantine_rows,
-    ensure_operational_tables,
     get_db_path,
     load_enquiries_and_meta,
     record_workspace_override,
     record_workspace_review,
 )
+from src.security.auth import VALID_ROLES, AuthContext
 from src.security.rbac import (
-    VALID_ROLES,
-    AuthContext,
     is_rbac_enforced_on_legacy,
     is_rbac_enforced_on_v1,
     require_roles,
 )
+from src.pilot.pilot_tracker import log_pilot_effort_session, summarize_pilot_20bd
+from src.api.monitoring import router as monitoring_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+VN_TZ = timezone(timedelta(hours=7))
 
 app = FastAPI(
     title="SongNhat AI-02 Predictive Lead Prioritization API",
@@ -59,8 +70,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(monitoring_router)
 
-def _get_db_path():
+
+def _get_db_path() -> Path:
     return get_db_path()
 
 
@@ -120,7 +133,7 @@ def health_check() -> dict[str, str]:
 def block_lead_or_account_v1(
     payload: dict[str, Any] = Body(...),
     _auth: AuthContext | None = Depends(
-        require_roles({"SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+        require_roles({"SUPERVISOR", "ADMINISTRATOR", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
     return block_lead_or_account(payload=payload, _auth=_auth)
@@ -130,13 +143,10 @@ def block_lead_or_account_v1(
 def block_lead_or_account(
     payload: dict[str, Any] = Body(...),
     _auth: AuthContext | None = Depends(
-        require_roles({"SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_legacy)
+        require_roles({"SUPERVISOR", "ADMINISTRATOR", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_legacy)
     ),
 ) -> dict[str, Any]:
-    """
-    PLPT-17: Kích hoạt chặn khẩn cấp theo enquiry_id và/hoặc account_key.
-    Hồ sơ bị chặn sẽ biến mất ngay lập tức khỏi GET /api/queue và /api/v1/workspace/queue.
-    """
+    """PLPT-17: Kích hoạt chặn khẩn cấp theo enquiry_id và/hoặc account_key."""
     enquiry_id = str(
         payload.get("enquiry_id")
         or payload.get("enquiry")
@@ -170,46 +180,38 @@ def block_lead_or_account(
 
     if enquiry_id and not block_account:
         target_enq: str | None = enquiry_id
-        target_acct: str | None = None
+        target_acct: str | None = account_key or None
     else:
-        if not account_key:
-            raise HTTPException(
-                status_code=400,
-                detail="Cần cung cấp account_key khi chọn chế độ chặn toàn tài khoản.",
-            )
         target_enq = None
-        target_acct = account_key
+        target_acct = account_key or enquiry_id
 
-    db_path = get_db_path()
-    if not db_path.exists():
-        raise HTTPException(status_code=503, detail=f"Database not found: {db_path}")
-
+    db_path = _get_db_path()
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
-
     try:
         with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
             with conn:
-                ensure_operational_tables(conn)
-                if target_enq is not None:
-                    existing = conn.execute(
-                        """
-                        SELECT enquiry_id, account_key, reason, blocked_at
-                        FROM blocked_accounts
-                        WHERE enquiry_id = ?
-                        LIMIT 1
-                        """,
-                        (target_enq,),
-                    ).fetchone()
-                else:
-                    existing = conn.execute(
-                        """
-                        SELECT enquiry_id, account_key, reason, blocked_at
-                        FROM blocked_accounts
-                        WHERE COALESCE(enquiry_id, '') = '' AND account_key = ?
-                        LIMIT 1
-                        """,
-                        (target_acct,),
-                    ).fetchone()
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS blocked_accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        enquiry_id TEXT,
+                        account_key TEXT,
+                        reason TEXT,
+                        blocked_at TEXT NOT NULL,
+                        created_by TEXT DEFAULT 'PO_OPERATOR'
+                    )
+                    """
+                )
+                existing = conn.execute(
+                    """
+                    SELECT enquiry_id, account_key, reason, blocked_at
+                    FROM blocked_accounts
+                    WHERE (enquiry_id IS NOT NULL AND enquiry_id = ?)
+                       OR (account_key IS NOT NULL AND account_key = ?)
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (target_enq or "__NONE__", target_acct or "__NONE__"),
+                ).fetchone()
 
                 if existing is None:
                     conn.execute(
@@ -248,10 +250,7 @@ def get_queue(
         require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_legacy)
     ),
 ) -> dict[str, Any]:
-    """
-    Giữ nguyên schema GET /api/queue hiện tại để đảm bảo tương thích 100% với MVP & 35 unit test cũ,
-    đồng thời dùng chung tầng service đọc DB, check HOLD_STALE_DATA (>24h) và lọc blocked_accounts.
-    """
+    """Giữ nguyên schema GET /api/queue để đảm bảo tương thích 100% với MVP cũ."""
     try:
         (
             enquiries,
@@ -269,9 +268,7 @@ def get_queue(
         for entry in queue:
             enq_id = str(entry.get("enquiry_id") or "").strip()
             acct_key = str(entry.get("account_key") or "").strip()
-            if (enq_id and enq_id in blocked_enquiries) or (
-                acct_key and acct_key in blocked_accounts
-            ):
+            if enq_id in blocked_enquiries or acct_key in blocked_accounts:
                 continue
             active_queue.append(entry)
 
@@ -324,9 +321,31 @@ def get_queue(
         raise HTTPException(status_code=500, detail=f"Database error: {error}")
 
 
+@app.post("/api/v1/workspace/queue/daily")
+def create_daily_workspace_queue(
+    seed: int | None = Query(default=None, ge=0, le=MAX_SEED),
+) -> dict[str, Any]:
+    """PLPT-16: Khởi tạo phân bổ hàng đợi hàng ngày (Daily Queue Snapshot)."""
+    try:
+        db_path = _get_db_path()
+        if not db_path.exists():
+            raise FileNotFoundError(f"Database not found: {db_path}")
+
+        today_vn = datetime.now(VN_TZ).date()
+        allocation = get_or_create_daily_allocation(db_path, today_vn, seed=seed)
+        return {
+            "status": "OK",
+            "message": "Daily queue snapshot created successfully",
+            "date": today_vn.isoformat(),
+            "allocation": allocation,
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
 @app.get("/api/v1/workspace/queue")
 def get_workspace_queue(
-    view: str = Query(default="active", pattern="^(active|unscored|quarantine)$"),
+    view: str = Query(default="active"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=1000),
     q: str | None = Query(default=None),
@@ -335,15 +354,37 @@ def get_workspace_queue(
         require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-    """PLPT-24: Endpoint Workspace mới hỗ trợ phân bổ K slot, overflow ngoài Top-K, 10% exploration, overdue 2BD & tìm kiếm tiếng Việt."""
+    """PLPT-24: Endpoint Workspace phân bổ K slot, 10% exploration, overdue 2BD & tìm kiếm tiếng Việt."""
     try:
-        return build_workspace_queue_payload(
-            view=view,
+        norm_view = view.strip().lower() if view else "active"
+        if norm_view not in ("active", "unscored", "quarantine"):
+            norm_view = "active"
+
+        payload = build_workspace_queue_payload(
+            view=norm_view,
             page=page,
             limit=limit,
             query_text=q,
             include_overflow=include_overflow,
         )
+
+        db_path = _get_db_path()
+        if db_path.exists():
+            route, _, _, _ = _resolve_shadow_route(db_path)
+            scoring_mode = (
+                FALLBACK_SERVING_MODE
+                if route.fallback_triggered
+                else route.active_mode
+            )
+            payload["scoring_mode"] = scoring_mode
+            payload["fallback_reason"] = route.fallback_reason
+            payload["fallback_triggered"] = route.fallback_triggered
+        else:
+            payload["scoring_mode"] = RULES_LABEL
+            payload["fallback_reason"] = None
+            payload["fallback_triggered"] = False
+
+        return payload
     except FileNotFoundError as error:
         raise HTTPException(status_code=503, detail=str(error))
     except sqlite3.Error as error:
@@ -354,7 +395,7 @@ def get_workspace_queue(
 def post_workspace_review(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
-        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
     """PLPT-25: Ghi nhận ACCEPT_PRIORITY và xác minh quyền liên hệ khách hàng."""
@@ -373,10 +414,10 @@ def post_workspace_review(
 def post_workspace_override(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
-        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-    """PLPT-25 / CF-29: Ghi nhận OVERRIDE_PRIORITY vào staff_override_logs, cô lập hoàn toàn khỏi outcome_events."""
+    """PLPT-25: Ghi đè hàng đợi có giải trình nghiệp vụ."""
     try:
         user_id = auth.user_id if auth is not None else "PO_OPERATOR"
         return record_workspace_override(payload, user_id=user_id)
@@ -397,7 +438,7 @@ def get_shadow_summary_v1(
     ),
 ) -> dict[str, Any]:
     """PLPT-65: Shadow summary, drift and fail-safe serving route."""
-    db_path = get_db_path()
+    db_path = _get_db_path()
     if not db_path.exists():
         raise HTTPException(status_code=503, detail=f"Database not found: {db_path}")
     summary = get_shadow_summary(db_path, k=k)
@@ -431,7 +472,12 @@ def post_shadow_fallback_v1(
 ) -> dict[str, Any]:
     """PLPT-65: Return the detected automatic fallback or trigger a reasoned operator fallback."""
     payload = payload or {}
-    db_path = get_db_path()
+    reason = payload.get("reason")
+    if reason:
+        user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
+        return trigger_manual_fallback(reason=str(reason).strip(), triggered_by=user_id)
+
+    db_path = _get_db_path()
     if db_path.exists():
         route, latest_batch, drift_snapshot, drift_error = _resolve_shadow_route(
             db_path,
@@ -449,10 +495,8 @@ def post_shadow_fallback_v1(
                 "drift_error": drift_error,
             }
 
-    reason = str(payload.get("reason") or "MANUAL_OPERATOR_OVERRIDE").strip()
     user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
-    decision = trigger_manual_fallback(reason=reason, triggered_by=user_id)
-    return decision
+    return trigger_manual_fallback(reason="MANUAL_OPERATOR_OVERRIDE", triggered_by=user_id)
 
 
 @app.post("/api/v1/shadow/reset")
@@ -479,7 +523,54 @@ def get_models_registry_v1(
     ),
 ) -> dict[str, Any]:
     """MOD 08: Tra cứu danh sách các mô hình trong model_registry."""
-    db_path = get_db_path()
+    db_path = _get_db_path()
     models = list_registered_models(db_path)
     return {"total": len(models), "models": models}
 
+
+@app.post("/api/v1/pilot/effort")
+def post_pilot_effort(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    db_path = _get_db_path()
+    try:
+        entry = log_pilot_effort_session(
+            db_path,
+            business_date=payload.get("business_date") or datetime.now(VN_TZ).date(),
+            staff_id=str(payload.get("staff_id") or (auth.user_id if auth else "sales_user")),
+            enquiries_reviewed=int(payload.get("enquiries_reviewed", 0)),
+            queue_prep_minutes=float(payload.get("queue_prep_minutes", 0.0)),
+            triage_minutes=float(payload.get("triage_minutes", 0.0)),
+            due_total=int(payload.get("due_total", 0)),
+            due_on_time=int(payload.get("due_on_time", 0)),
+            override_count=int(payload.get("override_count", 0)),
+            treatment_arm=str(payload.get("treatment_arm") or "RULES_CONTROL"),
+        )
+        return {"status": "ok", "effort": entry}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+
+@app.get("/api/v1/pilot/telemetry")
+def get_pilot_telemetry(
+    baseline_minutes_per_lead: float = Query(default=6.0, gt=0.0),
+    baseline_on_time_rate: float = Query(default=0.95, ge=0.0, le=1.0),
+    _: AuthContext | None = Depends(
+        require_roles(
+            {"SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"},
+            is_rbac_enforced_on_v1,
+        )
+    ),
+) -> dict[str, Any]:
+    db_path = _get_db_path()
+    summary = summarize_pilot_20bd(
+        db_path,
+        baseline_minutes_per_lead=baseline_minutes_per_lead,
+        baseline_on_time_rate=baseline_on_time_rate,
+    )
+    return {"status": "ok", **summary}

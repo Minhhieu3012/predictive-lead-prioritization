@@ -1,171 +1,331 @@
 {
   "suite_name": "PLPT_GATE_G1_40_CONTROL_FIXTURES",
-  "executed_at_utc": "2026-11-22T11:16:27Z",
+  "executed_at_utc": "2026-11-21T02:56:56.143855+00:00",
   "total_fixtures": 40,
   "passed_count": 40,
   "failed_count": 0,
   "pass_rate_pct": 100.0,
   "gate_g1_controls_status": "PASSED",
-  "results": [
+  "fixtures": [
     {
       "fixture_id": "CF-01",
-      "status": "PASSED"
+      "name": "Exact t0 timestamp boundary",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "DAT 02, OPS 04",
+      "passed": true,
+      "details": "t0 (2026-11-10 08:00:00+07:00) == avail (2026-11-10 08:00:00+07:00) -> Accepted into frozen snapshot."
     },
     {
       "fixture_id": "CF-02",
-      "status": "PASSED"
+      "name": "Post-t0 future feature rejection",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "DAT 02, OPS 04",
+      "passed": true,
+      "details": "avail (2026-11-10 08:00:01+07:00) > t0 (2026-11-10 08:00:00+07:00) by 1s -> Blocked leakage."
     },
     {
       "fixture_id": "CF-03",
-      "status": "PASSED"
+      "name": "Later quotation or order field leakage",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "DAT 02, Annex B",
+      "passed": true,
+      "details": "Stripped 3 forbidden _DO_NOT_USE quote/PII fields."
     },
     {
       "fixture_id": "CF-04",
-      "status": "PASSED"
+      "name": "Pre-t0 account aggregate boundary",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "Part 1, MOD 04",
+      "passed": true,
+      "details": "Pre-t0 order count: 2 (expected 2)."
     },
     {
       "fixture_id": "CF-05",
-      "status": "PASSED"
+      "name": "Training cutoff immature horizon purge",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "MOD 03",
+      "passed": true,
+      "details": "Immature horizons purged: ['E-IMMATURE']; Retained: ['E-MATURE']."
     },
     {
       "fixture_id": "CF-06",
-      "status": "PASSED"
+      "name": "Production scoring isolation from outcomes",
+      "domain": "Domain A: Decision-Time (t0) Cutoff and Leakage Prevention",
+      "rfp_ref": "Part 6, Annex A",
+      "passed": true,
+      "details": "Production feature matrix has zero overlap with outcome_events (set())."
     },
     {
       "fixture_id": "CF-07",
-      "status": "PASSED"
+      "name": "Same enquiry across two channels",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 01, Annex B",
+      "passed": true,
+      "details": "Multi-channel merge to SN-WEB-07 with earliest t0."
     },
     {
       "fixture_id": "CF-08",
-      "status": "PASSED"
+      "name": "Distinct purchase needs on same account",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 01",
+      "passed": true,
+      "details": "Distinct purchase needs preserved as 2 separate slots."
     },
     {
       "fixture_id": "CF-09",
-      "status": "PASSED"
+      "name": "Uncertain duplicate routed to Steward",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "Annex B",
+      "passed": true,
+      "details": "Ambiguous match flagged for DATA_STEWARD review."
     },
     {
       "fixture_id": "CF-10",
-      "status": "PASSED"
+      "name": "Idempotent CSV batch rerun",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 07, OPS 01",
+      "passed": true,
+      "details": "Idempotent rerun: 0 duplicates created."
     },
     {
       "fixture_id": "CF-11",
-      "status": "PASSED"
+      "name": "Out-of-order late increment guard",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 07, OPS 01",
+      "passed": true,
+      "details": "Late older batch (2026-11-10 10:00:00+07:00) rejected from overwriting newer state (2026-11-10 14:00:00+07:00)."
     },
     {
       "fixture_id": "CF-12",
-      "status": "PASSED"
+      "name": "Missing timestamp and quarantine reconciliation",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 07, Part 13",
+      "passed": true,
+      "details": "Input (4) == accepted (2) + quarantined (2)."
     },
     {
       "fixture_id": "CF-13",
-      "status": "PASSED"
+      "name": "Explicit deletion / withdrawal event",
+      "domain": "Domain B: Identity Resolution, Deduplication and Ingestion Integrity",
+      "rfp_ref": "DAT 05, DAT 07, OPS 01",
+      "passed": true,
+      "details": "Withdrawal transitioned cleanly with audit trail intact."
     },
     {
       "fixture_id": "CF-14",
-      "status": "PASSED"
+      "name": "Evidenced POSITIVE within 60 calendar days",
+      "domain": "Domain C: 60-Day Outcome Maturity and Label Integrity",
+      "rfp_ref": "DAT 03, DAT 04",
+      "passed": true,
+      "details": "3/3 criteria satisfied within 60 days -> Labeled POSITIVE."
     },
     {
       "fixture_id": "CF-15",
-      "status": "PASSED"
+      "name": "CRM stage change alone without evidence",
+      "domain": "Domain C: 60-Day Outcome Maturity and Label Integrity",
+      "rfp_ref": "DAT 03",
+      "passed": true,
+      "details": "CRM stage changed without evidence rejected from POSITIVE."
     },
     {
       "fixture_id": "CF-16",
-      "status": "PASSED"
+      "name": "Mature NEGATIVE after full 60 calendar days",
+      "domain": "Domain C: 60-Day Outcome Maturity and Label Integrity",
+      "rfp_ref": "DAT 04",
+      "passed": true,
+      "details": "60+ days elapsed without qualification -> Labeled NEGATIVE."
     },
     {
       "fixture_id": "CF-17",
-      "status": "PASSED"
+      "name": "Recent unqualified enquiry remains UNKNOWN",
+      "domain": "Domain C: 60-Day Outcome Maturity and Label Integrity",
+      "rfp_ref": "DAT 04, Annex B",
+      "passed": true,
+      "details": "Day 25 unqualified lead remains UNKNOWN."
     },
     {
       "fixture_id": "CF-18",
-      "status": "PASSED"
+      "name": "Delayed outcome recording and label correction",
+      "domain": "Domain C: 60-Day Outcome Maturity and Label Integrity",
+      "rfp_ref": "OPS 04, Annex C, Part 13",
+      "passed": true,
+      "details": "Delayed outcome created version 2 without silent historical rewrite."
     },
     {
       "fixture_id": "CF-19",
-      "status": "PASSED"
+      "name": "New account with missing purchase history",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "MOD 04, Annex B, Part 13",
+      "passed": true,
+      "details": "New account handled via neutral baseline, segregated for evaluation."
     },
     {
       "fixture_id": "CF-20",
-      "status": "PASSED"
+      "name": "Incomplete specification fallback",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "MOD 06, USR 01",
+      "passed": true,
+      "details": "Incomplete specs routed to rules baseline; not discarded."
     },
     {
       "fixture_id": "CF-21",
-      "status": "PASSED"
+      "name": "Score meaning and non-probability display",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "MOD 05",
+      "passed": true,
+      "details": "Score rendered without probability percentage: 'Rank #1 - Score: 80 points'."
     },
     {
       "fixture_id": "CF-22",
-      "status": "PASSED"
+      "name": "Top-3 contributing factors and source timestamps",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "MOD 06",
+      "passed": true,
+      "details": "3 contributing factors exposed with non-causal disclaimer."
     },
     {
       "fixture_id": "CF-23",
-      "status": "PASSED"
+      "name": "Numerical score reproducibility",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "MOD 08",
+      "passed": true,
+      "details": "Numerical score difference 0.00000010 <= 1e-6."
     },
     {
       "fixture_id": "CF-24",
-      "status": "PASSED"
+      "name": "Model underperformance return to Rules Baseline",
+      "domain": "Domain D: Missing Data, New Accounts, Score Meaning and Fallback",
+      "rfp_ref": "Part 9, Annex B, Part 13",
+      "passed": true,
+      "details": "Lift 1.12 < 1.20x -> Reverted to RULES_BASELINE."
     },
     {
       "fixture_id": "CF-25",
-      "status": "PASSED"
+      "name": "Daily capacity K and 10% randomized exploration",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "USR 02",
+      "passed": true,
+      "details": "K=20: 18 ranked (90%) + 2 exploration (10%)."
     },
     {
       "fixture_id": "CF-26",
-      "status": "PASSED"
+      "name": "Tier 0 urgent replacement and SLA protection",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "MOD 07, USR 02, Annex B",
+      "passed": true,
+      "details": "Tier 0 items ['SN-TIER0-1', 'SN-TIER0-2'] occupied top slots without randomization."
     },
     {
       "fixture_id": "CF-27",
-      "status": "PASSED"
+      "name": "Two-business-day overdue supervisor escalation",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "USR 03, Annex B",
+      "passed": true,
+      "details": "Elapsed 3 business days without review -> is_overdue_2bd = True."
     },
     {
       "fixture_id": "CF-28",
-      "status": "PASSED"
+      "name": "Low-ranked aging enquiry visibility",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "USR 01, USR 03, Annex B",
+      "passed": true,
+      "details": "Rank 48 lead visible in cohort view, not purged."
     },
     {
       "fixture_id": "CF-29",
-      "status": "PASSED"
+      "name": "Mandatory override reason and ML label isolation",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "USR 04, USR 06, MOD 07, Part 13",
+      "passed": true,
+      "details": "Empty override returned 400; valid override isolated from outcome_events."
     },
     {
       "fixture_id": "CF-30",
-      "status": "PASSED"
+      "name": "Strict system execution boundary",
+      "domain": "Domain E: Queue Policy, Capacity K, Exploration, Escalation and Overrides",
+      "rfp_ref": "USR 05",
+      "passed": true,
+      "details": "Strict system execution boundary verified (0 outbound calls/emails/CRM writes)."
     },
     {
       "fixture_id": "CF-31",
-      "status": "PASSED"
+      "name": "Local emergency block display and export check",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "USR 07, OPS 05, Annex B",
+      "passed": true,
+      "details": "Locally blocked lead excluded from active queue and export."
     },
     {
       "fixture_id": "CF-32",
-      "status": "PASSED"
+      "name": "Withdrawn contact consent and CRM cutoff boundary",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "USR 07, Annex B, Part 13",
+      "passed": true,
+      "details": "Contact outreach blocked when consent is not verified."
     },
     {
       "fixture_id": "CF-33",
-      "status": "PASSED"
+      "name": "24-hour stale source data and failed batch hold",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "USR 07, OPS 02, OPS 05",
+      "passed": true,
+      "details": "Source age 28.0h > 24h -> Queue locked in HELD_STALE_DATA."
     },
     {
       "fixture_id": "CF-34",
-      "status": "PASSED"
+      "name": "PII minimization firewall enforcement",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "SEC 02",
+      "passed": true,
+      "details": "PII stripped; feature keys: ['enquiry_id', 'account_key', 'product_family']."
     },
     {
       "fixture_id": "CF-35",
-      "status": "PASSED"
+      "name": "RBAC, direct URL and stale session blocking",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "SEC 01",
+      "passed": true,
+      "details": "RBAC enforced: SALES_READER 403 on block; expired session 401."
     },
     {
       "fixture_id": "CF-36",
-      "status": "PASSED"
+      "name": "Backup restoration and restriction replay",
+      "domain": "Domain F: Emergency Block, 24h Freshness Hold, Security and Backup Replay",
+      "rfp_ref": "OPS 07, SEC 07, Annex C",
+      "passed": true,
+      "details": "Backup restoration replayed local block registry before enabling queue."
     },
     {
       "fixture_id": "CF-37",
-      "status": "PASSED"
+      "name": "Lossless Vietnamese UTF-8 and product codes",
+      "domain": "Domain G: Vietnamese Localization and Performance SLA",
+      "rfp_ref": "VN 01",
+      "passed": true,
+      "details": "Lossless UTF-8 roundtrip verified for 3 industrial texts."
     },
     {
       "fixture_id": "CF-38",
-      "status": "PASSED"
+      "name": "Missing Vietnamese diacritics search tolerance",
+      "domain": "Domain G: Vietnamese Localization and Performance SLA",
+      "rfp_ref": "VN 01",
+      "passed": true,
+      "details": "All 3 unaccented search queries accurately matched."
     },
     {
       "fixture_id": "CF-39",
-      "status": "PASSED"
+      "name": "Vietnamese business calendar and VND formatting",
+      "domain": "Domain G: Vietnamese Localization and Performance SLA",
+      "rfp_ref": "VN 01, OPS 04",
+      "passed": true,
+      "details": "VND currency formatted: '125.000.000 ₫'."
     },
     {
       "fixture_id": "CF-40",
-      "status": "PASSED"
+      "name": "Concurrency and p95 workspace latency SLA",
+      "domain": "Domain G: Vietnamese Localization and Performance SLA",
+      "rfp_ref": "Part 2, OPS 03",
+      "passed": true,
+      "details": "p95 latency 0.0000s <= 3.0s SLA."
     }
   ]
 }

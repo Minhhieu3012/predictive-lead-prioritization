@@ -21,10 +21,11 @@
     "prior_purchase_count_at_t0",
     "is_new_account_at_t0",
     "pre_t0_account_enquiry_count",
-    "days_to_contract_due_at_t0"
+    "days_to_contract_due_at_t0",
+    "account_history_status"
   ],
-  "feature_dictionary_hash": "sha256:545caab0b847af63c7b0e4646107b664",
-  "preprocessor_hash": "sha256:ed55ac14eeb37ac53f4aa7cc7cfb0088",
+  "feature_dictionary_hash": "sha256:36dcb7f630e034e296b268a9e50eb400",
+  "preprocessor_hash": "sha256:d57450c7f3b3f1c44ab8fde0524d0f86",
   "numerical_tolerance": 1e-06,
   "approval_status": "PENDING_GATE_G1_REVIEW",
   "serving_mode_locked": "RULES_BASELINE"

@@ -6,7 +6,7 @@ from typing import Any
 RULES_LABEL = "RULES_BASELINE"
 VN_TZ = timezone(timedelta(hours=7))
 
-# Tổng trọng số: 100 điểm (theo docs/us_02_tieu_chi_rubric_va_trang_thai.md)
+# Tổng trọng số: 100 điểm (theo docs/discovery/us_02_tieu_chi_rubric_va_trang_thai.md)
 WEIGHTS = {
     "product_fit": 30,
     "spec_completeness": 25,

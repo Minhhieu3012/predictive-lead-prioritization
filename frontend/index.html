@@ -179,6 +179,7 @@
         <span class="stat-label">Tuổi snapshot nguồn</span>
         <strong id="stat-snapshot-age" class="stat-value">—</strong>
         <div id="stat-score-mode" class="stat-note">RULES_BASELINE</div>
+        <span id="fallback-badge" class="badge badge-warn" style="display: none; margin-top: 4px;">Fallback: <strong id="fallback-reason">-</strong></span>
       </article>
     </section>
 
@@ -609,7 +610,17 @@
       $("stat-snapshot-age").textContent = formatSnapshotAge(payload.snapshot_age);
       
       const itemWithMode = (payload.items || []).find(item => item.score_mode);
-      $("stat-score-mode").textContent = itemWithMode?.score_mode || "—";
+      $("stat-score-mode").textContent = payload.scoring_mode || itemWithMode?.score_mode || "—";
+      const fbBadge = $("fallback-badge");
+      if (fbBadge) {
+        const fbReason = payload.fallback_reason || (payload.route && payload.route.fallback_reason);
+        if (fbReason) {
+          $("fallback-reason").textContent = fbReason;
+          fbBadge.style.display = "inline-block";
+        } else {
+          fbBadge.style.display = "none";
+        }
+      }
       $("status-badge").textContent = payload.status || "—";
       const badgeState = stale || payload.status === "QUARANTINE_SOURCE_UNAVAILABLE"
         ? "badge-hold"

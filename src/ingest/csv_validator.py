@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -247,86 +248,87 @@ def validate_and_load() -> None:
 
     # Lưu vào SQLite dùng UPSERT theo enquiry_id
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        init_db(conn)
-        conn.executemany(
-            """
-            INSERT INTO raw_enquiries (
-                enquiry_id, account_key, cohort, source, t0_time, extraction_time,
-                product_family, project_ref_code, spec_completeness, is_urgent_replacement,
-                contract_due_date, workflow_state, industry_at_t0,
-                enquiry_channel_at_t0, region_at_t0, account_age_days_at_t0,
-                prior_purchase_count_at_t0, estimated_value_band_at_t0,
-                feature_event_time, feature_available_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(enquiry_id) DO UPDATE SET
-                account_key = excluded.account_key,
-                cohort = excluded.cohort,
-                source = excluded.source,
-                t0_time = excluded.t0_time,
-                extraction_time = excluded.extraction_time,
-                product_family = excluded.product_family,
-                project_ref_code = excluded.project_ref_code,
-                spec_completeness = excluded.spec_completeness,
-                is_urgent_replacement = excluded.is_urgent_replacement,
-                contract_due_date = excluded.contract_due_date,
-                workflow_state = excluded.workflow_state,
-                industry_at_t0 = excluded.industry_at_t0,
-                enquiry_channel_at_t0 = excluded.enquiry_channel_at_t0,
-                region_at_t0 = excluded.region_at_t0,
-                account_age_days_at_t0 = excluded.account_age_days_at_t0,
-                prior_purchase_count_at_t0 = excluded.prior_purchase_count_at_t0,
-                estimated_value_band_at_t0 = excluded.estimated_value_band_at_t0,
-                feature_event_time = excluded.feature_event_time,
-                feature_available_at = excluded.feature_available_at
-            WHERE excluded.extraction_time >= raw_enquiries.extraction_time
-            """,
-            valid_enq_rows,
-        )
-        conn.executemany(
-            """
-            INSERT INTO raw_outcomes (
-                enquiry_id, event_type, event_time, recorded_at,
-                qualification_evidence, business_need_confirmed,
-                product_fit_confirmed, agreed_next_step_confirmed,
-                observer_coverage, observation_window_days, maturity_state,
-                label, correction_status, cohort
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(enquiry_id) DO UPDATE SET
-                event_type = excluded.event_type,
-                event_time = excluded.event_time,
-                recorded_at = excluded.recorded_at,
-                qualification_evidence = excluded.qualification_evidence,
-                business_need_confirmed = excluded.business_need_confirmed,
-                product_fit_confirmed = excluded.product_fit_confirmed,
-                agreed_next_step_confirmed = excluded.agreed_next_step_confirmed,
-                observer_coverage = excluded.observer_coverage,
-                observation_window_days = excluded.observation_window_days,
-                maturity_state = excluded.maturity_state,
-                label = excluded.label,
-                correction_status = excluded.correction_status,
-                cohort = excluded.cohort
-            WHERE COALESCE(NULLIF(excluded.recorded_at, ''), excluded.event_time, '')
-               >= COALESCE(NULLIF(raw_outcomes.recorded_at, ''), raw_outcomes.event_time, '')
-            """,
-            valid_out_rows,
-        )
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        with conn:
+            init_db(conn)
+            conn.executemany(
+                """
+                INSERT INTO raw_enquiries (
+                    enquiry_id, account_key, cohort, source, t0_time, extraction_time,
+                    product_family, project_ref_code, spec_completeness, is_urgent_replacement,
+                    contract_due_date, workflow_state, industry_at_t0,
+                    enquiry_channel_at_t0, region_at_t0, account_age_days_at_t0,
+                    prior_purchase_count_at_t0, estimated_value_band_at_t0,
+                    feature_event_time, feature_available_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(enquiry_id) DO UPDATE SET
+                    account_key = excluded.account_key,
+                    cohort = excluded.cohort,
+                    source = excluded.source,
+                    t0_time = excluded.t0_time,
+                    extraction_time = excluded.extraction_time,
+                    product_family = excluded.product_family,
+                    project_ref_code = excluded.project_ref_code,
+                    spec_completeness = excluded.spec_completeness,
+                    is_urgent_replacement = excluded.is_urgent_replacement,
+                    contract_due_date = excluded.contract_due_date,
+                    workflow_state = excluded.workflow_state,
+                    industry_at_t0 = excluded.industry_at_t0,
+                    enquiry_channel_at_t0 = excluded.enquiry_channel_at_t0,
+                    region_at_t0 = excluded.region_at_t0,
+                    account_age_days_at_t0 = excluded.account_age_days_at_t0,
+                    prior_purchase_count_at_t0 = excluded.prior_purchase_count_at_t0,
+                    estimated_value_band_at_t0 = excluded.estimated_value_band_at_t0,
+                    feature_event_time = excluded.feature_event_time,
+                    feature_available_at = excluded.feature_available_at
+                WHERE excluded.extraction_time >= raw_enquiries.extraction_time
+                """,
+                valid_enq_rows,
+            )
+            conn.executemany(
+                """
+                INSERT INTO raw_outcomes (
+                    enquiry_id, event_type, event_time, recorded_at,
+                    qualification_evidence, business_need_confirmed,
+                    product_fit_confirmed, agreed_next_step_confirmed,
+                    observer_coverage, observation_window_days, maturity_state,
+                    label, correction_status, cohort
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(enquiry_id) DO UPDATE SET
+                    event_type = excluded.event_type,
+                    event_time = excluded.event_time,
+                    recorded_at = excluded.recorded_at,
+                    qualification_evidence = excluded.qualification_evidence,
+                    business_need_confirmed = excluded.business_need_confirmed,
+                    product_fit_confirmed = excluded.product_fit_confirmed,
+                    agreed_next_step_confirmed = excluded.agreed_next_step_confirmed,
+                    observer_coverage = excluded.observer_coverage,
+                    observation_window_days = excluded.observation_window_days,
+                    maturity_state = excluded.maturity_state,
+                    label = excluded.label,
+                    correction_status = excluded.correction_status,
+                    cohort = excluded.cohort
+                WHERE COALESCE(NULLIF(excluded.recorded_at, ''), excluded.event_time, '')
+                   >= COALESCE(NULLIF(raw_outcomes.recorded_at, ''), raw_outcomes.event_time, '')
+                """,
+                valid_out_rows,
+            )
 
-        # SN-BUG-03: Nếu enquiry_id đang hoạt động bị lỗi schema ở lần nạp mới nhất -> tạm ẩn/xóa khỏi DB để không phục vụ sai
-        if bad_ids:
-            placeholders = ",".join("?" for _ in bad_ids)
-            bad_tuple = tuple(bad_ids)
-            conn.execute(f"DELETE FROM raw_enquiries WHERE enquiry_id IN ({placeholders})", bad_tuple)
-            has_clean = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='clean_enquiries'"
-            ).fetchone()
-            if has_clean:
-                conn.execute(f"DELETE FROM clean_enquiries WHERE enquiry_id IN ({placeholders})", bad_tuple)
+            # SN-BUG-03: Nếu enquiry_id đang hoạt động bị lỗi schema ở lần nạp mới nhất -> tạm ẩn/xóa khỏi DB để không phục vụ sai
+            if bad_ids:
+                placeholders = ",".join("?" for _ in bad_ids)
+                bad_tuple = tuple(bad_ids)
+                conn.execute(f"DELETE FROM raw_enquiries WHERE enquiry_id IN ({placeholders})", bad_tuple)
+                has_clean = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='clean_enquiries'"
+                ).fetchone()
+                if has_clean:
+                    conn.execute(f"DELETE FROM clean_enquiries WHERE enquiry_id IN ({placeholders})", bad_tuple)
 
-        conn.commit()
+            conn.commit()
 
-        db_enq_count = conn.execute("SELECT COUNT(*) FROM raw_enquiries").fetchone()[0]
-        db_out_count = conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0]
+            db_enq_count = conn.execute("SELECT COUNT(*) FROM raw_enquiries").fetchone()[0]
+            db_out_count = conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0]
 
     # Chỉ ghi file quarantine sau khi commit SQLite thành công
     QUARANTINE_PATH.parent.mkdir(parents=True, exist_ok=True)

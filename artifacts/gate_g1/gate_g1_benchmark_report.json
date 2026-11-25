@@ -1,0 +1,73 @@
+{
+  "evaluation_version": "gate-g1-eval-v1.0.0",
+  "data_origin": "SYNTHETIC",
+  "model_version": "plpt-logreg-v1.0.0",
+  "capacity_k": 25,
+  "cohort_counts": {
+    "total_eligible": 50,
+    "verified_positive": 0,
+    "verified_negative": 0,
+    "unknown_immature": 50,
+    "outcome_coverage_pct": 0.0
+  },
+  "sealed_cohort_fingerprint": "3363339bb3a57fdaa871f8132467c6371aded758331be6b75213a15d883644f9",
+  "rules_baseline_metrics": {
+    "selected_count": 25,
+    "precision_at_k_conservative": 0.0,
+    "precision_at_k_upper_bound": 1.0,
+    "recall_at_k": 0.0,
+    "average_precision": 0.0,
+    "selected_outcome_coverage_pct": 0.0,
+    "new_account_precision_at_k": 0.0,
+    "returning_account_precision_at_k": 0.0
+  },
+  "candidate_model_metrics": {
+    "selected_count": 25,
+    "precision_at_k_conservative": 0.0,
+    "precision_at_k_upper_bound": 1.0,
+    "recall_at_k": 0.0,
+    "average_precision": 0.0,
+    "selected_outcome_coverage_pct": 0.0,
+    "new_account_precision_at_k": 0.0,
+    "returning_account_precision_at_k": 0.0
+  },
+  "segment_breakdown": {
+    "new_accounts": {
+      "rules_baseline_precision_at_k": 0.0,
+      "candidate_model_precision_at_k": 0.0
+    },
+    "returning_accounts": {
+      "rules_baseline_precision_at_k": 0.0,
+      "candidate_model_precision_at_k": 0.0
+    }
+  },
+  "lift_and_uncertainty": {
+    "precision_at_k_lift": null,
+    "paired_diff_mean": 0.0,
+    "paired_95_ci": [
+      0.0,
+      0.0
+    ],
+    "ci_lower_bound_exceeds_zero": false
+  },
+  "criteria_results": {
+    "G1-C1": true,
+    "G1-C2": true,
+    "G1-C3": true,
+    "G1-C4": false,
+    "G1-C5": false,
+    "G1-C6": false,
+    "G1-C7": false,
+    "REAL_DATA_VERIFIED": false
+  },
+  "failed_criteria": [
+    "G1-C4",
+    "G1-C5",
+    "G1-C6",
+    "G1-C7",
+    "REAL_DATA_VERIFIED"
+  ],
+  "gate_g1_decision": "FALLBACK_RULES_BASELINE",
+  "active_serving_mode": "RULES_BASELINE",
+  "disclaimer": "Offline ranking lift reflects historical qualification association and does not establish causal sales uplift."
+}

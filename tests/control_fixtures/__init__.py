@@ -1,1 +1,1 @@
-"""Package tests.control_fixtures: 40 Automated Control Fixtures for Gate G1."""
+"""Control fixtures package for Gate G1 (CF-01 to CF-40)."""

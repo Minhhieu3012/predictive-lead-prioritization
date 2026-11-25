@@ -250,3 +250,127 @@ def estimate_paired_bootstrap_ci(
         baseline_key,
         **kwargs,
     )
+
+
+# ==============================================================================
+# PLPT-28 Paired Cluster Bootstrap
+# ==============================================================================
+
+import numpy as np
+import pandas as pd
+
+
+def run_paired_cluster_bootstrap(
+    sealed_df: pd.DataFrame,
+    baseline_selected_ids: set[str],
+    model_selected_ids: set[str],
+    *,
+    n_bootstrap: int = 10000,
+    random_state: int = 42,
+    min_clusters: int = 10,
+) -> dict[str, Any]:
+    if sealed_df.empty:
+        return {
+            "n_bootstrap": n_bootstrap,
+            "random_state": random_state,
+            "min_clusters": min_clusters,
+            "n_clusters": 0,
+            "sufficient_clusters": False,
+            "paired_diff_mean": 0.0,
+            "paired_95_ci": [0.0, 0.0],
+            "mean_delta_precision_at_k": 0.0,
+            "ci_lower_2_5": 0.0,
+            "ci_upper_97_5": 0.0,
+            "ci_lower_bound_exceeds_zero": False,
+        }
+
+    df = sealed_df.copy()
+    if "cohort_date_block" not in df.columns:
+        if "t0_time" in df.columns:
+            df["cohort_date_block"] = (
+                pd.to_datetime(df["t0_time"], errors="coerce")
+                .dt.strftime("%Y-%m-%d")
+                .fillna("UNKNOWN_DATE")
+            )
+        else:
+            df["cohort_date_block"] = "UNKNOWN_DATE"
+
+    if "account_key" not in df.columns:
+        df["account_key"] = "UNKNOWN_ACCOUNT"
+
+    df["cluster_id"] = (
+        df["cohort_date_block"].astype(str) + "::" + df["account_key"].astype(str)
+    )
+
+    df["label_norm"] = df["label"].astype(str).str.strip().str.upper()
+    df["y_true"] = (df["label_norm"] == "POSITIVE").astype(int)
+
+    cluster_keys = df["cluster_id"].unique()
+    n_clusters = len(cluster_keys)
+
+    if n_clusters < min_clusters:
+        return {
+            "n_bootstrap": n_bootstrap,
+            "random_state": random_state,
+            "min_clusters": min_clusters,
+            "n_clusters": int(n_clusters),
+            "sufficient_clusters": False,
+            "paired_diff_mean": 0.0,
+            "paired_95_ci": [0.0, 0.0],
+            "mean_delta_precision_at_k": 0.0,
+            "ci_lower_2_5": 0.0,
+            "ci_upper_97_5": 0.0,
+            "ci_lower_bound_exceeds_zero": False,
+        }
+
+    clusters_dict = {
+        cid: group[["enquiry_id", "y_true"]]
+        for cid, group in df.groupby("cluster_id")
+    }
+
+    base_set = set(baseline_selected_ids)
+    model_set = set(model_selected_ids)
+
+    cluster_stats = []
+    for cid in cluster_keys:
+        grp = clusters_dict[cid]
+        b_hits = grp[grp["enquiry_id"].isin(base_set)]["y_true"].sum()
+        b_sel = grp["enquiry_id"].isin(base_set).sum()
+        m_hits = grp[grp["enquiry_id"].isin(model_set)]["y_true"].sum()
+        m_sel = grp["enquiry_id"].isin(model_set).sum()
+        cluster_stats.append((b_hits, b_sel, m_hits, m_sel))
+
+    stats_arr = np.array(cluster_stats, dtype=float)
+
+    rng = np.random.default_rng(random_state)
+    deltas = np.zeros(n_bootstrap, dtype=float)
+
+    for b in range(n_bootstrap):
+        sampled_indices = rng.integers(0, n_clusters, size=n_clusters)
+        sampled_stats = stats_arr[sampled_indices]
+        total_b_hits = sampled_stats[:, 0].sum()
+        total_b_sel = sampled_stats[:, 1].sum()
+        total_m_hits = sampled_stats[:, 2].sum()
+        total_m_sel = sampled_stats[:, 3].sum()
+
+        p_base = (total_b_hits / total_b_sel) if total_b_sel > 0 else 0.0
+        p_model = (total_m_hits / total_m_sel) if total_m_sel > 0 else 0.0
+        deltas[b] = p_model - p_base
+
+    ci_lower = float(np.percentile(deltas, 2.5))
+    ci_upper = float(np.percentile(deltas, 97.5))
+    mean_delta = float(np.mean(deltas))
+
+    return {
+        "n_bootstrap": n_bootstrap,
+        "random_state": random_state,
+        "min_clusters": int(min_clusters),
+        "n_clusters": int(n_clusters),
+        "sufficient_clusters": True,
+        "paired_diff_mean": round(mean_delta, 4),
+        "paired_95_ci": [round(ci_lower, 4), round(ci_upper, 4)],
+        "mean_delta_precision_at_k": round(mean_delta, 6),
+        "ci_lower_2_5": round(ci_lower, 6),
+        "ci_upper_97_5": round(ci_upper, 6),
+        "ci_lower_bound_exceeds_zero": bool(ci_lower > 0.0),
+    }

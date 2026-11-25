@@ -1,0 +1,31 @@
+{
+  "model_version": "plpt-logreg-v1.0.0",
+  "candidate_type": "REGULARIZED_LOGISTIC_REGRESSION",
+  "secondary_candidate_type": "DECISION_TREE_SHALLOW",
+  "random_seed": 42,
+  "training_cutoff_t0": "2026-08-31T23:59:59+07:00",
+  "mature_horizon_days": 60,
+  "training_row_count": 1200,
+  "positive_count": 200,
+  "negative_count": 1000,
+  "data_origin": "SYNTHETIC",
+  "feature_columns_used": [
+    "product_family",
+    "spec_completeness",
+    "is_urgent_replacement",
+    "industry_at_t0",
+    "enquiry_channel_at_t0",
+    "region_at_t0",
+    "estimated_value_band_at_t0",
+    "account_age_days_at_t0",
+    "prior_purchase_count_at_t0",
+    "is_new_account_at_t0",
+    "pre_t0_account_enquiry_count",
+    "days_to_contract_due_at_t0"
+  ],
+  "feature_dictionary_hash": "sha256:545caab0b847af63c7b0e4646107b664",
+  "preprocessor_hash": "sha256:ed55ac14eeb37ac53f4aa7cc7cfb0088",
+  "numerical_tolerance": 1e-06,
+  "approval_status": "PENDING_GATE_G1_REVIEW",
+  "serving_mode_locked": "RULES_BASELINE"
+}

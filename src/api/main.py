@@ -1,16 +1,18 @@
+"""SongNhat AI-02 Predictive Lead Prioritization API."""
 
-"""PLPT-16, PLPT-17 & PLPT-41: Queue API and overdue escalation."""
-
-import csv
 from datetime import datetime, timedelta, timezone
+import contextlib
+import csv
+import json
 import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Literal
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.rules.rules_engine import RULES_LABEL, _parse_datetime, build_queue
 from src.queue_allocation import (
     MAX_SEED,
     configured_capacity_k,
@@ -18,73 +20,47 @@ from src.queue_allocation import (
     get_or_create_daily_allocation,
     rank_enquiries_by_cohort,
 )
-from src.rules.rules_engine import RULES_LABEL, _parse_datetime, build_queue
-from src.rules.vietnamese_business_calendar import (
-    is_overdue_after_business_days,
+from src.rules.vietnamese_business_calendar import is_overdue_after_business_days
+from src.models.serving_router import (
+    DEFAULT_SERVING_MODE,
+    FALLBACK_SERVING_MODE,
+    PREDICTIVE_SERVING_MODE,
+    ServingRouteDecision,
+    get_active_scoring_mode,
+    get_manual_fallback_state,
+    get_serving_health,
+    reset_manual_fallback,
+    resolve_serving_route,
+    trigger_manual_fallback,
 )
+from src.models.shadow_runner import get_shadow_summary
+from src.models.train_candidates import get_registered_model, list_registered_models
+from src.services.queue_service import (
+    STALE_HOLD_HOURS,
+    STALE_STATUS,
+    WorkspaceActionError,
+    build_workspace_queue_payload,
+    count_quarantine_rows,
+    get_db_path,
+    load_enquiries_and_meta,
+    record_workspace_override,
+    record_workspace_review,
+)
+from src.security.auth import VALID_ROLES, AuthContext
+from src.security.rbac import (
+    is_rbac_enforced_on_legacy,
+    is_rbac_enforced_on_v1,
+    require_roles,
+)
+from src.pilot.pilot_tracker import log_pilot_effort_session, summarize_pilot_20bd
+from src.api.monitoring import router as monitoring_router
 
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VN_TZ = timezone(timedelta(hours=7))
-STALE_HOLD_HOURS = 24.0
-
-QUARANTINE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "data"
-    / "quarantine"
-    / "quarantine_rows.csv"
-)
-
-
-# ==========================================================
-# PLPT-41: Vietnam datetime and overdue helpers
-# ==========================================================
-
-def _to_vn_datetime(value: Any) -> datetime | None:
-    """Parse timestamp and normalize it to Vietnam timezone."""
-    if value is None or str(value).strip() == "":
-        return None
-
-    parsed = _parse_datetime(value)
-
-    if parsed is None:
-        return None
-
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=VN_TZ)
-
-    return parsed.astimezone(VN_TZ)
-
-
-def _get_overdue_status(
-    enquiry: dict[str, Any],
-    now: datetime,
-) -> bool:
-    """Determine whether an enquiry missed its first-review SLA."""
-
-    if enquiry.get("first_reviewed_at"):
-        return False
-
-    eligible_at = (
-        enquiry.get("queue_eligible_at")
-        or enquiry.get("eligible_at")
-        or enquiry.get("t0_time")
-    )
-
-    eligible_datetime = _to_vn_datetime(eligible_at)
-
-    if eligible_datetime is None:
-        return False
-
-    return is_overdue_after_business_days(
-        eligible_datetime,
-        now,
-        business_days=2,
-    )
-
 
 app = FastAPI(
     title="SongNhat AI-02 Predictive Lead Prioritization API",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -94,395 +70,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(monitoring_router)
+
 
 def _get_db_path() -> Path:
-    project_root = Path(__file__).resolve().parents[2]
-
-    return Path(
-        os.getenv(
-            "DATABASE_PATH",
-            str(project_root / "data" / "songnhat.db"),
-        )
-    )
+    return get_db_path()
 
 
-def _ensure_blocked_table(conn: sqlite3.Connection) -> None:
-    """Tạo bảng blocked_accounts nếu chưa tồn tại (PLPT-17)."""
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS blocked_accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            enquiry_id TEXT,
-            account_key TEXT,
-            reason TEXT,
-            blocked_at TEXT NOT NULL,
-            created_by TEXT DEFAULT 'PO_OPERATOR'
-        )
-        """
-    )
-
-    existing_cols = {
-        row[1]
-        for row in conn.execute(
-            "PRAGMA table_info(blocked_accounts)"
-        ).fetchall()
-    }
-
-    if "reason" not in existing_cols:
-        conn.execute(
-            "ALTER TABLE blocked_accounts ADD COLUMN reason TEXT"
-        )
-
-    if "created_by" not in existing_cols:
-        conn.execute(
-            """
-            ALTER TABLE blocked_accounts
-            ADD COLUMN created_by TEXT DEFAULT 'PO_OPERATOR'
-            """
-        )
-
-    conn.commit()
+def _count_quarantine_rows() -> int:
+    return count_quarantine_rows()
 
 
-def load_enquiries_and_meta() -> tuple[list[dict[str, Any]], set[str], set[str], float | None]:
-    """
-    Đọc clean_enquiries hoặc fallback raw_enquiries,
-    loại bỏ hồ sơ đã đóng hoặc đã rút và lấy danh sách blocked.
-    """
-
-    db_path = _get_db_path()
-
-    if not db_path.exists():
-        raise FileNotFoundError(
-            f"Database not found: {db_path}"
-        )
-
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        has_clean = cursor.execute(
-            """
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='clean_enquiries'
-            """
-        ).fetchone()
-
-        has_raw = cursor.execute(
-            """
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='raw_enquiries'
-            """
-        ).fetchone()
-
-        table_name = (
-            "clean_enquiries"
-            if has_clean
-            else ("raw_enquiries" if has_raw else None)
-        )
-
-        if table_name is None:
-            return [], set(), set(), None
-
-        cursor.execute(
-            f"SELECT * FROM {table_name} "
-            f"WHERE COALESCE(LOWER(TRIM(workflow_state)), '') NOT IN ('closed', 'withdrawn')"
-        )
-
-        enquiries = [
-            dict(row)
-            for row in cursor.fetchall()
-        ]
-
-        blocked_enquiries: set[str] = set()
-        blocked_accounts: set[str] = set()
-
-        has_blocked_table = cursor.execute(
-            """
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='blocked_accounts'
-            """
-        ).fetchone()
-
-        if has_blocked_table:
-            for row in cursor.execute(
-                "SELECT * FROM blocked_accounts"
-            ).fetchall():
-
-                row_dict = dict(row)
-
-                enq_val = str(
-                    row_dict.get("enquiry_id") or ""
-                ).strip()
-
-                acct_val = str(
-                    row_dict.get("account_key") or ""
-                ).strip()
-
-                if enq_val:
-                    blocked_enquiries.add(enq_val)
-                elif acct_val:
-                    blocked_accounts.add(acct_val)
-
-        # Tính source_age_hours dựa trên extraction_time; nếu rỗng hoặc bất kỳ hồ sơ còn hiệu lực nào thiếu/sai định dạng -> None
-        has_unverified_extraction = False
-        latest_ext = None
-
-        for row in enquiries:
-            ext_dt = _parse_datetime(row.get("extraction_time"))
-            if ext_dt is None:
-                has_unverified_extraction = True
-                break
-            if ext_dt.tzinfo is None:
-                ext_dt = ext_dt.replace(tzinfo=VN_TZ)
-            if latest_ext is None or ext_dt > latest_ext:
-                latest_ext = ext_dt
-
-        if not enquiries or has_unverified_extraction or latest_ext is None:
-            age_hours: float | None = None
-        else:
-            now_vn = datetime.now(VN_TZ)
-            age_hours = max(0.0, round((now_vn - latest_ext).total_seconds() / 3600.0, 2))
-
-        return (
-            enquiries,
-            blocked_enquiries,
-            blocked_accounts,
-            age_hours,
-        )
-
-
-def _read_quarantine_records() -> tuple[
-    list[dict[str, Any]],
-    bool,
-]:
-    if not QUARANTINE_PATH.exists():
-        return [], False
-
-    permitted_fields = (
-        "enquiry_id",
-        "account_key",
-        "cohort",
-        "source",
-        "t0_time",
-        "extraction_time",
-        "product_family",
-        "quarantine_reason",
-    )
-
-    with QUARANTINE_PATH.open(
-        encoding="utf-8-sig",
-        newline="",
-    ) as quarantine_file:
-
-        rows = csv.DictReader(quarantine_file)
-
-        records = [
-            {
-                field: row.get(field)
-                for field in permitted_fields
-                if field in row
-            }
-            for row in rows
-        ]
-
-    return records, True
-
-
-def _snapshot_age_seconds(
-    allocation: dict[str, Any] | None,
-) -> float | None:
-
-    if allocation is None:
-        return None
-
-    created_at = _parse_datetime(
-        allocation.get("created_at")
-    )
-
-    if created_at is None:
-        raise ValueError(
-            "Daily allocation has an invalid created_at timestamp"
-        )
-
-    now_utc = datetime.now(timezone.utc)
-
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(
-            tzinfo=timezone.utc
-        )
-
-    return round(
-        max(
-            0.0,
-            (now_utc - created_at).total_seconds(),
-        ),
-        2,
-    )
-
-
-def _snapshot_model_ranks(
-    allocation: dict[str, Any] | None,
-) -> dict[str, int]:
-
-    if allocation is None:
-        return {}
-
-    candidates = (
-        allocation["selected"]
-        + allocation["deferred"]
-    )
-
-    cohorts: dict[str, list[dict[str, Any]]] = {}
-
-    for item in candidates:
-        cohort_id = str(
-            item.get("cohort_id")
-            or item.get("cohort")
-            or ""
-        )
-
-        cohorts.setdefault(
-            cohort_id,
-            [],
-        ).append(item)
-
-    ranks: dict[str, int] = {}
-
-    for cohort_items in cohorts.values():
-
-        def model_order_key(
-            item: dict[str, Any],
-        ) -> tuple[float, float, str]:
-
-            parsed_t0 = _parse_datetime(
-                item.get("t0_time")
-            )
-
-            return (
-                -float(item.get("rules_score") or 0),
-                (
-                    parsed_t0.timestamp()
-                    if parsed_t0 is not None
-                    else float("inf")
-                ),
-                str(item.get("enquiry_id") or ""),
-            )
-
-        ordered = sorted(
-            cohort_items,
-            key=model_order_key,
-        )
-
-        for index, item in enumerate(
-            ordered,
-            start=1,
-        ):
-            stored_rank = item.get("model_rank")
-
-            ranks[
-                str(item.get("enquiry_id") or "")
-            ] = (
-                stored_rank
-                if isinstance(stored_rank, int)
-                else index
-            )
-
-    return ranks
-
-
-def _workspace_queue_item(
-    item: dict[str, Any],
+def _resolve_shadow_route(
+    db_path: Path,
     *,
-    final_work_order: int | None,
-    snapshot_age: float | None,
-) -> dict[str, Any]:
-
-    timestamp_field = item.get("timestamp_source")
-
-    source_timestamp = (
-        item.get(timestamp_field)
-        if timestamp_field in {
-            "t0_time",
-            "feature_event_time",
-        }
-        else None
+    requested_mode: str | None = None,
+) -> tuple[
+    ServingRouteDecision,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    str | None,
+]:
+    health = get_serving_health(db_path)
+    route = resolve_serving_route(
+        requested_mode=(
+            requested_mode
+            or os.getenv("ACTIVE_SCORING_MODE", DEFAULT_SERVING_MODE).strip().upper()
+        ),
+        gate_g1_report=Path(
+            os.getenv(
+                "GATE_G1_REPORT_PATH",
+                str(PROJECT_ROOT / "artifacts" / "gate_g1" / "gate_g1_benchmark_report.json"),
+            )
+        ),
+        manifest=Path(
+            os.getenv(
+                "MODEL_MANIFEST_PATH",
+                str(PROJECT_ROOT / "artifacts" / "models" / "plpt-logreg-v1.0.0" / "manifest.json"),
+            )
+        ),
+        batch_error=health["batch_error"],
+        drift_fallback_triggered=bool(
+            health["drift_snapshot"]
+            and health["drift_snapshot"].get("recommended_fallback_to_rules")
+        ),
+        drift_error=health["drift_error"],
     )
-
-    return {
-        "enquiry_id": str(
-            item.get("enquiry_id") or ""
-        ),
-        "account_key": item.get("account_key"),
-        "cohort_id": (
-            item.get("cohort_id")
-            or item.get("cohort")
-        ),
-        "owner": item.get("owner"),
-        "model_rank": item.get("model_rank"),
-        "final_work_order": final_work_order,
-        "snapshot_age": snapshot_age,
-
-        # PLPT-41
-        "is_overdue_2bd": bool(
-            item.get("is_overdue_2bd", False)
-        ),
-
-        "score_mode": item.get("score_mode"),
-        "score": item.get("rules_score"),
-        "score_unit": item.get("score_unit"),
-        "allocation_type": item.get("allocation_type"),
-        "contract_due_date": item.get("contract_due_date"),
-
-        "contributing_factors": [
-            {
-                "factor": factor.get("factor"),
-                "value": factor.get("points"),
-                "reason": factor.get("reason"),
-                "source_timestamp": source_timestamp,
-                "source_timestamp_field": timestamp_field,
-            }
-            for factor in (
-                item.get("top_contributors") or []
-            )[:3]
-        ],
-    }
-
-
-def _unscored_workspace_item(
-    enquiry: dict[str, Any],
-    snapshot_age: float | None,
-) -> dict[str, Any]:
-
-    return {
-        "enquiry_id": str(
-            enquiry.get("enquiry_id") or ""
-        ),
-        "account_key": enquiry.get("account_key"),
-        "cohort_id": (
-            enquiry.get("cohort_id")
-            or enquiry.get("cohort")
-        ),
-        "owner": enquiry.get("owner"),
-        "model_rank": None,
-        "final_work_order": None,
-        "snapshot_age": snapshot_age,
-        "score_mode": None,
-        "score": None,
-        "score_unit": None,
-        "allocation_type": None,
-        "contract_due_date": enquiry.get(
-            "contract_due_date"
-        ),
-        "is_overdue_2bd": bool(
-            enquiry.get("is_overdue_2bd", False)
-        ),
-        "contributing_factors": [],
-        "unscored_reason": (
-            "No valid scoring result in the daily allocation snapshot"
-        ),
-    }
+    return (
+        route,
+        health["latest_batch"],
+        health["drift_snapshot"],
+        health["drift_error"],
+    )
 
 
 @app.get("/api/health")
@@ -490,11 +129,24 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/api/v1/workspace/block")
+def block_lead_or_account_v1(
+    payload: dict[str, Any] = Body(...),
+    _auth: AuthContext | None = Depends(
+        require_roles({"SUPERVISOR", "ADMINISTRATOR", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    return block_lead_or_account(payload=payload, _auth=_auth)
+
+
 @app.post("/api/block")
 def block_lead_or_account(
     payload: dict[str, Any] = Body(...),
+    _auth: AuthContext | None = Depends(
+        require_roles({"SUPERVISOR", "ADMINISTRATOR", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_legacy)
+    ),
 ) -> dict[str, Any]:
-
+    """PLPT-17: Kích hoạt chặn khẩn cấp theo enquiry_id và/hoặc account_key."""
     enquiry_id = str(
         payload.get("enquiry_id")
         or payload.get("enquiry")
@@ -502,7 +154,6 @@ def block_lead_or_account(
         or payload.get("id")
         or ""
     ).strip()
-
     account_key = str(
         payload.get("account_key")
         or payload.get("account")
@@ -516,92 +167,69 @@ def block_lead_or_account(
         or payload.get("block_reason")
         or "Emergency block by operator"
     ).strip()
-
     created_by = str(
         payload.get("created_by")
-        or "PO_OPERATOR"
+        or (_auth.user_id if _auth is not None else "PO_OPERATOR")
     ).strip()
 
     if not enquiry_id and not account_key:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Cần cung cấp ít nhất một trong hai trường: "
-                "enquiry_id hoặc account_key."
-            ),
+            detail="Cần cung cấp ít nhất một trong hai trường: enquiry_id hoặc account_key.",
         )
 
-    # Nếu gửi enquiry_id mà không chọn rõ chế độ chặn toàn tài khoản, chỉ chặn theo enquiry_id
     if enquiry_id and not block_account:
         target_enq: str | None = enquiry_id
-        target_acct: str | None = None
+        target_acct: str | None = account_key or None
     else:
-        if not account_key:
-            raise HTTPException(
-                status_code=400,
-                detail="Cần cung cấp account_key khi chọn chế độ chặn toàn tài khoản.",
-            )
         target_enq = None
-        target_acct = account_key
+        target_acct = account_key or enquiry_id
 
     db_path = _get_db_path()
-
-    if not db_path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=f"Database not found: {db_path}",
-        )
-
-    now_iso = datetime.now(
-        VN_TZ
-    ).replace(
-        microsecond=0
-    ).isoformat()
-
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-
-            _ensure_blocked_table(conn)
-            if target_enq is not None:
-                existing = conn.execute(
-                    """
-                    SELECT enquiry_id, account_key, reason, blocked_at
-                    FROM blocked_accounts
-                    WHERE enquiry_id = ?
-                    LIMIT 1
-                    """,
-                    (target_enq,),
-                ).fetchone()
-            else:
-                existing = conn.execute(
-                    """
-                    SELECT enquiry_id, account_key, reason, blocked_at
-                    FROM blocked_accounts
-                    WHERE COALESCE(enquiry_id, '') = '' AND account_key = ?
-                    LIMIT 1
-                    """,
-                    (target_acct,),
-                ).fetchone()
-
-            if existing is None:
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
                 conn.execute(
                     """
-                    INSERT INTO blocked_accounts
-                    (enquiry_id, account_key, reason, blocked_at, created_by)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (target_enq, target_acct, reason, now_iso, created_by),
+                    CREATE TABLE IF NOT EXISTS blocked_accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        enquiry_id TEXT,
+                        account_key TEXT,
+                        reason TEXT,
+                        blocked_at TEXT NOT NULL,
+                        created_by TEXT DEFAULT 'PO_OPERATOR'
+                    )
+                    """
                 )
+                existing = conn.execute(
+                    """
+                    SELECT enquiry_id, account_key, reason, blocked_at
+                    FROM blocked_accounts
+                    WHERE (enquiry_id IS NOT NULL AND enquiry_id = ?)
+                       OR (account_key IS NOT NULL AND account_key = ?)
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (target_enq or "__NONE__", target_acct or "__NONE__"),
+                ).fetchone()
 
-                conn.commit()
-                blocked_at = now_iso
-                enquiry_id = target_enq or ""
-                account_key = target_acct or ""
-            else:
-                enquiry_id = existing[0] or ""
-                account_key = existing[1] or ""
-                reason = existing[2] or reason
-                blocked_at = existing[3] or now_iso
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO blocked_accounts (enquiry_id, account_key, reason, blocked_at, created_by)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (target_enq, target_acct, reason, now_iso, created_by),
+                    )
+                    conn.commit()
+                    blocked_at = now_iso
+                    enquiry_id = target_enq or ""
+                    account_key = target_acct or ""
+                else:
+                    enquiry_id = existing[0] or ""
+                    account_key = existing[1] or ""
+                    reason = existing[2] or reason
+                    blocked_at = existing[3] or now_iso
 
         return {
             "blocked": True,
@@ -611,125 +239,68 @@ def block_lead_or_account(
             "reason": reason,
             "blocked_at": blocked_at,
         }
-
     except sqlite3.Error as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database error: {error}",
-        )
-
-
-def _count_quarantine_rows() -> int:
-    project_root = Path(__file__).resolve().parents[2]
-    quarantine_dir = Path(os.getenv("QUARANTINE_DIR", str(project_root / "data" / "quarantine")))
-    unique_ids: set[str] = set()
-    no_id_rows = 0
-    for fname in ("quarantine_rows.csv", "quarantine_outcomes.csv"):
-        fpath = quarantine_dir / fname
-        if fpath.exists():
-            with fpath.open("r", encoding="utf-8", errors="replace", newline="") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    enq_id = str(row.get("enquiry_id") or "").strip()
-                    if enq_id:
-                        unique_ids.add(enq_id)
-                    elif any(str(v or "").strip() for v in row.values()):
-                        no_id_rows += 1
-    return len(unique_ids) + no_id_rows
-
-
-def _source_freshness_warning(source_age_hours: float | None) -> str | None:
-    if source_age_hours is None:
-        return (
-            "Không xác minh được độ tươi dữ liệu nguồn "
-            "(tập dữ liệu rỗng hoặc thiếu/sai định dạng extraction_time). "
-            "Hàng đợi tạm khóa để đảm bảo an toàn vận hành."
-        )
-    if source_age_hours > STALE_HOLD_HOURS:
-        return (
-            f"Dữ liệu nguồn đã cũ {source_age_hours} giờ (vượt ngưỡng 24 giờ). "
-            "Hàng đợi tạm khóa để đảm bảo an toàn vận hành."
-        )
-    return None
+        raise HTTPException(status_code=500, detail=f"Database error: {error}")
 
 
 @app.get("/api/queue")
 def get_queue(
     limit: int = Query(default=25, ge=1, le=1000),
+    _auth: AuthContext | None = Depends(
+        require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_legacy)
+    ),
 ) -> dict[str, Any]:
-
+    """Giữ nguyên schema GET /api/queue để đảm bảo tương thích 100% với MVP cũ."""
     try:
         (
             enquiries,
             blocked_enquiries,
             blocked_accounts,
             source_age_hours,
+            _reviewed,
+            _overridden,
+            _steward_count,
         ) = load_enquiries_and_meta()
-
         now_vn = datetime.now(VN_TZ)
-
-        queue = build_queue(
-            enquiries,
-            now=now_vn,
-            exclude_closed=True,
-        )
+        queue = build_queue(enquiries, now=now_vn, exclude_closed=True)
 
         active_queue = []
-
         for entry in queue:
-
-            enq_id = str(
-                entry.get("enquiry_id") or ""
-            ).strip()
-
-            acct_key = str(
-                entry.get("account_key") or ""
-            ).strip()
-
-            if (
-                enq_id and enq_id in blocked_enquiries
-            ) or (
-                acct_key and acct_key in blocked_accounts
-            ):
+            enq_id = str(entry.get("enquiry_id") or "").strip()
+            acct_key = str(entry.get("account_key") or "").strip()
+            if enq_id in blocked_enquiries or acct_key in blocked_accounts:
                 continue
-
             active_queue.append(entry)
 
-        warning = _source_freshness_warning(source_age_hours)
-        is_stale = warning is not None
-        status = "HOLD_STALE_DATA" if is_stale else "OK"
+        is_stale = source_age_hours is None or source_age_hours > STALE_HOLD_HOURS
+        status = STALE_STATUS if is_stale else "OK"
+        if source_age_hours is None:
+            warning = (
+                "Không xác minh được độ tươi dữ liệu nguồn (tập dữ liệu rỗng hoặc thiếu/sai định dạng extraction_time). "
+                "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
+            )
+        elif is_stale:
+            warning = (
+                f"Dữ liệu nguồn đã cũ {source_age_hours} giờ (vượt ngưỡng 24 giờ). "
+                "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
+            )
+        else:
+            warning = None
 
         items: list[dict[str, Any]] = []
-
         if not is_stale:
-
-            for idx, entry in enumerate(
-                active_queue[:limit],
-                start=1,
-            ):
+            for idx, entry in enumerate(active_queue[:limit], start=1):
                 items.append(
                     {
-                        "enquiry_id": str(
-                            entry.get("enquiry_id") or ""
-                        ),
-                        "account_key": str(
-                            entry.get("account_key") or ""
-                        ),
+                        "enquiry_id": str(entry.get("enquiry_id") or ""),
+                        "account_key": str(entry.get("account_key") or ""),
                         "final_rank": idx,
-                        "rule_score": float(
-                            entry["rules_score"]
-                        ),
+                        "rule_score": float(entry["rules_score"]),
                         "score_mode": RULES_LABEL,
-                        "is_urgent": bool(
-                            entry["tier0_bypass"]
-                        ),
+                        "is_urgent": bool(entry["tier0_bypass"]),
                         "is_blocked": False,
-                        "reasons": list(
-                            entry.get("reasons") or []
-                        ),
-                        "t0_time": str(
-                            entry.get("t0_time") or ""
-                        ),
+                        "reasons": list(entry.get("reasons") or []),
+                        "t0_time": str(entry.get("t0_time") or ""),
                     }
                 )
 
@@ -738,561 +309,268 @@ def get_queue(
             "locked": is_stale,
             "warning": warning,
             "source_age_hours": source_age_hours,
-            "quarantine_count": _count_quarantine_rows(),
+            "quarantine_count": count_quarantine_rows(),
             "total": len(active_queue) if not is_stale else 0,
             "items": items,
             "data": items,
         }
 
     except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=str(error),
-        )
-
+        raise HTTPException(status_code=503, detail=str(error))
     except sqlite3.Error as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database error: {error}",
-        )
+        raise HTTPException(status_code=500, detail=f"Database error: {error}")
 
 
 @app.post("/api/v1/workspace/queue/daily")
 def create_daily_workspace_queue(
-    seed: int | None = Query(
-        default=None,
-        ge=0,
-        le=MAX_SEED,
-    ),
+    seed: int | None = Query(default=None, ge=0, le=MAX_SEED),
 ) -> dict[str, Any]:
-
+    """PLPT-16: Khởi tạo phân bổ hàng đợi hàng ngày (Daily Queue Snapshot)."""
     try:
         db_path = _get_db_path()
-
         if not db_path.exists():
-            raise FileNotFoundError(
-                f"Database not found: {db_path}"
-            )
+            raise FileNotFoundError(f"Database not found: {db_path}")
 
-        with sqlite3.connect(str(db_path)) as conn:
-
-            has_source = conn.execute(
-                """
-                SELECT 1 FROM sqlite_master
-                WHERE type = 'table'
-                  AND name IN ('clean_enquiries', 'raw_enquiries')
-                LIMIT 1
-                """
-            ).fetchone()
-
-        if has_source is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "No clean_enquiries or raw_enquiries "
-                    "source table is available"
-                ),
-            )
-
-        (
-            enquiries,
-            blocked_enquiries,
-            blocked_accounts,
-            source_age_hours,
-        ) = load_enquiries_and_meta()
-
-        warning = _source_freshness_warning(source_age_hours)
-
-        if warning is not None:
-            return {
-                "status": "HELD_STALE_DATA",
-                "locked": True,
-                "source_age_hours": source_age_hours,
-                "warning": warning,
-                "allocation": None,
-            }
-
-        active_enquiries = []
-
-        for enquiry in enquiries:
-
-            enquiry_id = str(
-                enquiry.get("enquiry_id") or ""
-            ).strip()
-
-            account_key = str(
-                enquiry.get("account_key") or ""
-            ).strip()
-
-            if (
-                enquiry_id and enquiry_id in blocked_enquiries
-            ) or (
-                account_key and account_key in blocked_accounts
-            ):
-                continue
-
-            active_enquiries.append(enquiry)
-
-        now_vn = datetime.now(VN_TZ)
-
-        ranked = rank_enquiries_by_cohort(
-            active_enquiries,
-            now=now_vn,
-        )
-
-        allocation = get_or_create_daily_allocation(
-            db_path,
-            ranked,
-            business_date=now_vn.date(),
-            capacity_k=configured_capacity_k(),
-            seed=seed,
-        )
-
+        today_vn = datetime.now(VN_TZ).date()
+        allocation = get_or_create_daily_allocation(db_path, today_vn, seed=seed)
         return {
-            "status": allocation["status"],
-            "locked": False,
-            "source_age_hours": source_age_hours,
+            "status": "OK",
+            "message": "Daily queue snapshot created successfully",
+            "date": today_vn.isoformat(),
             "allocation": allocation,
         }
-
-    except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=str(error),
-        )
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=422,
-            detail=str(error),
-        )
-
-    except sqlite3.Error as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database error: {error}",
-        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 
 @app.get("/api/v1/workspace/queue")
 def get_workspace_queue(
-    view: Literal[
-        "Active",
-        "Unscored",
-        "Quarantine",
-    ] = Query(default="Active"),
-    limit: int = Query(
-        default=100,
-        ge=1,
-        le=1000,
+    view: str = Query(default="active"),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=1000),
+    q: str | None = Query(default=None),
+    include_overflow: bool = Query(default=False),
+    _auth: AuthContext | None = Depends(
+        require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-
-    """Read one workspace view without changing a queue snapshot."""
-
+    """PLPT-24: Endpoint Workspace phân bổ K slot, 10% exploration, overdue 2BD & tìm kiếm tiếng Việt."""
     try:
+        norm_view = view.strip().lower() if view else "active"
+        if norm_view not in ("active", "unscored", "quarantine"):
+            norm_view = "active"
+
+        payload = build_workspace_queue_payload(
+            view=norm_view,
+            page=page,
+            limit=limit,
+            query_text=q,
+            include_overflow=include_overflow,
+        )
+
         db_path = _get_db_path()
-
-        if not db_path.exists():
-            raise FileNotFoundError(
-                f"Database not found: {db_path}"
+        if db_path.exists():
+            route, _, _, _ = _resolve_shadow_route(db_path)
+            scoring_mode = (
+                FALLBACK_SERVING_MODE
+                if route.fallback_triggered
+                else route.active_mode
             )
-
-        with sqlite3.connect(str(db_path)) as conn:
-
-            has_source = conn.execute(
-                """
-                SELECT 1 FROM sqlite_master
-                WHERE type = 'table'
-                  AND name IN ('clean_enquiries', 'raw_enquiries')
-                LIMIT 1
-                """
-            ).fetchone()
-
-        if has_source is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "No clean_enquiries or raw_enquiries "
-                    "source table is available"
-                ),
-            )
-
-        (
-            enquiries,
-            blocked_enquiries,
-            blocked_accounts,
-            source_age_hours,
-        ) = load_enquiries_and_meta()
-
-        active_source = [
-            enquiry
-            for enquiry in enquiries
-            if (
-                str(enquiry.get("enquiry_id") or "").strip()
-                not in blocked_enquiries
-            )
-            and (
-                str(enquiry.get("account_key") or "").strip()
-                not in blocked_accounts
-            )
-        ]
-
-        active_source_ids = {
-            str(
-                enquiry.get("enquiry_id") or ""
-            ).strip()
-            for enquiry in active_source
-        }
-
-        now_vn = datetime.now(VN_TZ)
-
-        allocation = get_daily_allocation(
-            db_path,
-            now_vn.date(),
-        )
-
-        snapshot_age = _snapshot_age_seconds(
-            allocation
-        )
-
-        model_ranks = _snapshot_model_ranks(
-            allocation
-        )
-
-        warning = _source_freshness_warning(source_age_hours)
-
-        classification_basis = None
-
-        # ==================================================
-        # PLPT-41: Two-Business-Day Overdue Escalation
-        # ==================================================
-
-        source_by_id = {
-            str(
-                enquiry.get("enquiry_id") or ""
-            ).strip(): enquiry
-            for enquiry in active_source
-        }
-
-        overdue_by_id: dict[str, bool] = {}
-
-        for enquiry in active_source:
-
-            enquiry_id = str(
-                enquiry.get("enquiry_id") or ""
-            ).strip()
-
-            overdue_by_id[enquiry_id] = (
-                _get_overdue_status(
-                    enquiry,
-                    now_vn,
-                )
-            )
-
-        overdue_2bd_count = sum(
-            overdue_by_id.values()
-        )
-
-        capacity_k = (
-            allocation.get("capacity_k")
-            if allocation
-            else configured_capacity_k()
-        )
-
-        # Tier 0 mandatory workload
-        mandatory_count = sum(
-            1
-            for enquiry in active_source
-            if (
-                str(
-                    enquiry.get(
-                        "is_urgent_replacement",
-                        "",
-                    )
-                ).lower() == "true"
-                or str(
-                    enquiry.get(
-                        "has_contractual_sla",
-                        "",
-                    )
-                ).lower() == "true"
-            )
-        )
-
-        is_overloaded = (
-            mandatory_count >= capacity_k
-        )
-
-        # ==================================================
-        # Active View
-        # ==================================================
-
-        if view == "Active":
-
-            selected = (
-                allocation["selected"]
-                if allocation is not None
-                else []
-            )
-
-            selected = [
-                item
-                for item in selected
-                if str(
-                    item.get("enquiry_id") or ""
-                ).strip() in active_source_ids
-            ]
-
-            items = []
-
-            for index, item in enumerate(
-                selected,
-                start=1,
-            ):
-
-                enquiry_id = str(
-                    item.get("enquiry_id") or ""
-                ).strip()
-
-                source = source_by_id.get(
-                    enquiry_id,
-                    {},
-                )
-
-                combined = {
-                    **source,
-                    **item,
-
-                    "first_reviewed_at": (
-                        item.get("first_reviewed_at")
-                        or source.get("first_reviewed_at")
-                    ),
-
-                    "queue_eligible_at": (
-                        item.get("queue_eligible_at")
-                        or source.get("queue_eligible_at")
-                    ),
-
-                    "eligible_at": (
-                        item.get("eligible_at")
-                        or source.get("eligible_at")
-                    ),
-
-                    "t0_time": (
-                        item.get("t0_time")
-                        or source.get("t0_time")
-                    ),
-
-                    "is_overdue_2bd": (
-                        overdue_by_id.get(
-                            enquiry_id,
-                            False,
-                        )
-                    ),
-
-                    "model_rank": model_ranks.get(
-                        enquiry_id
-                    ),
-                }
-
-                workspace_item = _workspace_queue_item(
-                    combined,
-                    final_work_order=index,
-                    snapshot_age=snapshot_age,
-                )
-
-                items.append(workspace_item)
-
-            if warning is not None:
-                status = "HELD_STALE_DATA"
-                items = []
-
-            elif allocation is None:
-                status = "NO_DAILY_SNAPSHOT"
-
-            else:
-                status = allocation["status"]
-
-            total = len(items)
-            source_available = True
-
-        # ==================================================
-        # Unscored View
-        # ==================================================
-
-        elif view == "Unscored":
-
-            classification_basis = (
-                "Not present in the persisted daily scoring snapshot"
-            )
-
-            snapshot_ids = set()
-
-            if allocation is not None:
-                snapshot_ids = {
-                    str(
-                        item.get("enquiry_id") or ""
-                    ).strip()
-                    for item in (
-                        allocation["selected"]
-                        + allocation["deferred"]
-                    )
-                }
-
-            unscored = [
-                enquiry
-                for enquiry in active_source
-                if str(
-                    enquiry.get("enquiry_id") or ""
-                ).strip() not in snapshot_ids
-            ]
-
-            items = []
-
-            for enquiry in unscored:
-
-                enquiry_id = str(
-                    enquiry.get("enquiry_id") or ""
-                ).strip()
-
-                enriched_enquiry = {
-                    **enquiry,
-                    "is_overdue_2bd": (
-                        overdue_by_id.get(
-                            enquiry_id,
-                            False,
-                        )
-                    ),
-                }
-
-                items.append(
-                    _unscored_workspace_item(
-                        enriched_enquiry,
-                        snapshot_age,
-                    )
-                )
-
-            total = len(items)
-
-            status = (
-                "OK"
-                if allocation is not None
-                else "NO_DAILY_SNAPSHOT"
-            )
-
-            source_available = True
-
-        # ==================================================
-        # Quarantine View
-        # ==================================================
-
+            payload["scoring_mode"] = scoring_mode
+            payload["fallback_reason"] = route.fallback_reason
+            payload["fallback_triggered"] = route.fallback_triggered
         else:
+            payload["scoring_mode"] = RULES_LABEL
+            payload["fallback_reason"] = None
+            payload["fallback_triggered"] = False
 
-            quarantine_records, source_available = (
-                _read_quarantine_records()
-            )
-
-            items = [
-                {
-                    "enquiry_id": str(
-                        record.get("enquiry_id") or ""
-                    ),
-                    "account_key": record.get("account_key"),
-                    "cohort_id": record.get("cohort"),
-                    "owner": record.get("owner"),
-                    "model_rank": None,
-                    "final_work_order": None,
-                    "snapshot_age": snapshot_age,
-                    "score_mode": None,
-                    "score": None,
-                    "score_unit": None,
-                    "allocation_type": None,
-                    "contract_due_date": None,
-                    "is_overdue_2bd": False,
-                    "contributing_factors": [],
-                    "quarantine_reason": record.get(
-                        "quarantine_reason"
-                    ),
-                }
-                for record in quarantine_records
-            ]
-
-            total = len(items)
-
-            status = (
-                "OK"
-                if source_available
-                else "QUARANTINE_SOURCE_UNAVAILABLE"
-            )
-
-        # ==================================================
-        # Workspace API Response
-        # ==================================================
-
-        return {
-            "view": view,
-            "status": status,
-
-            "snapshot_age": snapshot_age,
-            "snapshot_age_unit": "seconds",
-            "locked": status == "HELD_STALE_DATA",
-            "warning": warning if status == "HELD_STALE_DATA" else None,
-
-            "snapshot_created_at": (
-                allocation.get("created_at")
-                if allocation
-                else None
-            ),
-
-            "source_age_hours": source_age_hours,
-
-            "capacity_k": capacity_k,
-
-            # PLPT-41
-            "overdue_2bd_count": overdue_2bd_count,
-            "mandatory_count": mandatory_count,
-            "is_overloaded": is_overloaded,
-
-            "scheduled_today": (
-                len(allocation["selected"])
-                if allocation
-                else 0
-            ),
-
-            "exploration_slots": (
-                allocation.get("exploration_slots", 0)
-                if allocation
-                else 0
-            ),
-
-            "view_source_available": source_available,
-            "classification_basis": classification_basis,
-
-            "total": total,
-            "items": items[:limit],
-        }
-
+        return payload
     except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=str(error),
-        )
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
-
+        raise HTTPException(status_code=503, detail=str(error))
     except sqlite3.Error as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database error: {error}",
+        raise HTTPException(status_code=500, detail=f"Database error: {error}")
+
+
+@app.post("/api/v1/workspace/review")
+def post_workspace_review(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-25: Ghi nhận ACCEPT_PRIORITY và xác minh quyền liên hệ khách hàng."""
+    try:
+        user_id = auth.user_id if auth is not None else "PO_OPERATOR"
+        return record_workspace_review(payload, user_id=user_id)
+    except WorkspaceActionError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=500, detail=f"Database error: {error}")
+
+
+@app.post("/api/v1/workspace/override")
+def post_workspace_override(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-25: Ghi đè hàng đợi có giải trình nghiệp vụ."""
+    try:
+        user_id = auth.user_id if auth is not None else "PO_OPERATOR"
+        return record_workspace_override(payload, user_id=user_id)
+    except WorkspaceActionError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=500, detail=f"Database error: {error}")
+
+
+@app.get("/shadow/summary")
+@app.get("/api/v1/shadow/summary")
+def get_shadow_summary_v1(
+    k: int = Query(default=25, ge=1, le=500),
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-65: Shadow summary, drift and fail-safe serving route."""
+    db_path = _get_db_path()
+    if not db_path.exists():
+        raise HTTPException(status_code=503, detail=f"Database not found: {db_path}")
+    summary = get_shadow_summary(db_path, k=k)
+    route, latest_batch, drift_snapshot, drift_error = _resolve_shadow_route(db_path)
+    summary["active_serving_mode"] = route.active_mode
+    summary["fallback_reason"] = route.fallback_reason
+    summary["fallback_triggered"] = route.fallback_triggered
+    summary["route"] = route.to_dict()
+    summary["status"] = "FALLBACK" if route.fallback_triggered else "OK"
+    summary["latest_batch"] = latest_batch
+    summary["drift"] = drift_snapshot
+    summary["drift_error"] = drift_error
+    reg_model = get_registered_model(db_path)
+    if reg_model:
+        summary["registered_model"] = {
+            "model_version": reg_model.get("model_version"),
+            "approval_status": reg_model.get("approval_status"),
+            "training_row_count": reg_model.get("training_row_count"),
+            "feature_dictionary_hash": reg_model.get("feature_dictionary_hash"),
+        }
+    return summary
+
+
+@app.post("/shadow/fallback")
+@app.post("/api/v1/shadow/fallback")
+def post_shadow_fallback_v1(
+    payload: dict[str, Any] | None = Body(default=None),
+    auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-65: Return the detected automatic fallback or trigger a reasoned operator fallback."""
+    payload = payload or {}
+    reason = payload.get("reason")
+    if reason:
+        user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
+        return trigger_manual_fallback(reason=str(reason).strip(), triggered_by=user_id)
+
+    db_path = _get_db_path()
+    if db_path.exists():
+        route, latest_batch, drift_snapshot, drift_error = _resolve_shadow_route(
+            db_path,
+            requested_mode=PREDICTIVE_SERVING_MODE,
         )
+        if route.fallback_triggered:
+            return {
+                "status": "FALLBACK_ACTIVE",
+                "active_mode": route.active_mode,
+                "fallback_triggered": True,
+                "fallback_reason": route.fallback_reason,
+                "triggered_by": auth.user_id if auth is not None else "MODEL_REVIEWER",
+                "latest_batch": latest_batch,
+                "drift": drift_snapshot,
+                "drift_error": drift_error,
+            }
 
-from src.api.monitoring import router as monitoring_router
-app.include_router(monitoring_router)
+    user_id = auth.user_id if auth is not None else "MODEL_REVIEWER"
+    return trigger_manual_fallback(reason="MANUAL_OPERATOR_OVERRIDE", triggered_by=user_id)
 
-from src.api.monitoring import router as monitoring_router
-app.include_router(monitoring_router)
+
+@app.post("/api/v1/shadow/reset")
+def post_shadow_reset_v1(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """Khôi phục trạng thái phục vụ tự động (tắt fallback thủ công)."""
+    reset_manual_fallback()
+    route = resolve_serving_route()
+    return {
+        "status": "RESET_SUCCESS",
+        "active_mode": route.active_mode,
+        "fallback_triggered": route.fallback_triggered,
+        "fallback_reason": route.fallback_reason,
+    }
+
+
+@app.get("/api/v1/models/registry")
+def get_models_registry_v1(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """MOD 08: Tra cứu danh sách các mô hình trong model_registry."""
+    db_path = _get_db_path()
+    models = list_registered_models(db_path)
+    return {"total": len(models), "models": models}
+
+
+@app.post("/api/v1/pilot/effort")
+def post_pilot_effort(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR", "STAFF", "PO_OPERATOR"}, is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    db_path = _get_db_path()
+    try:
+        entry = log_pilot_effort_session(
+            db_path,
+            business_date=payload.get("business_date") or datetime.now(VN_TZ).date(),
+            staff_id=str(payload.get("staff_id") or (auth.user_id if auth else "sales_user")),
+            enquiries_reviewed=int(payload.get("enquiries_reviewed", 0)),
+            queue_prep_minutes=float(payload.get("queue_prep_minutes", 0.0)),
+            triage_minutes=float(payload.get("triage_minutes", 0.0)),
+            due_total=int(payload.get("due_total", 0)),
+            due_on_time=int(payload.get("due_on_time", 0)),
+            override_count=int(payload.get("override_count", 0)),
+            treatment_arm=str(payload.get("treatment_arm") or "RULES_CONTROL"),
+        )
+        return {"status": "ok", "effort": entry}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+
+@app.get("/api/v1/pilot/telemetry")
+def get_pilot_telemetry(
+    baseline_minutes_per_lead: float = Query(default=6.0, gt=0.0),
+    baseline_on_time_rate: float = Query(default=0.95, ge=0.0, le=1.0),
+    _: AuthContext | None = Depends(
+        require_roles(
+            {"SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"},
+            is_rbac_enforced_on_v1,
+        )
+    ),
+) -> dict[str, Any]:
+    db_path = _get_db_path()
+    summary = summarize_pilot_20bd(
+        db_path,
+        baseline_minutes_per_lead=baseline_minutes_per_lead,
+        baseline_on_time_rate=baseline_on_time_rate,
+    )
+    return {"status": "ok", **summary}

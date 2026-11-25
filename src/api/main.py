@@ -2,11 +2,13 @@
 
 from datetime import datetime
 import contextlib
+from pathlib import Path
 import sqlite3
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from src.rules.rules_engine import RULES_LABEL, build_queue
 from src.services.queue_service import (
@@ -43,12 +45,53 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def ensure_utf8_json_charset(request: Request, call_next):
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if content_type.lower() == "application/json":
+        response.headers["content-type"] = "application/json; charset=utf-8"
+    return response
+
+
 def _get_db_path():
     return get_db_path()
 
 
 def _count_quarantine_rows() -> int:
     return count_quarantine_rows()
+
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+FRONTEND_INDEX_PATH = FRONTEND_DIR / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def serve_workspace_index() -> FileResponse:
+    if not FRONTEND_INDEX_PATH.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao diện frontend/index.html.")
+    return FileResponse(FRONTEND_INDEX_PATH, media_type="text/html; charset=utf-8")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def serve_workspace_css() -> FileResponse:
+    css_path = FRONTEND_DIR / "styles.css"
+    if not css_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy frontend/styles.css.")
+    return FileResponse(css_path, media_type="text/css; charset=utf-8")
+
+
+@app.get("/app.js", include_in_schema=False)
+def serve_workspace_js() -> FileResponse:
+    js_path = FRONTEND_DIR / "app.js"
+    if not js_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy frontend/app.js.")
+    return FileResponse(js_path, media_type="application/javascript; charset=utf-8")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/api/health")

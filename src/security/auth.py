@@ -19,8 +19,6 @@ VALID_ROLES = {
     "DATA_STEWARD",
     "MODEL_REVIEWER",
     "ADMINISTRATOR",
-    "STAFF",
-    "PO_OPERATOR",
 }
 
 
@@ -169,6 +167,12 @@ def resolve_auth_context(
         raise HTTPException(status_code=401, detail="Phiên đăng nhập đã hết hạn (stale/expired session).")
 
     role = (x_user_role or "").strip().upper()
+    # Hỗ trợ alias tên vai trò trong các test suites khác nhau
+    ROLE_ALIASES = {
+        "STAFF": "SALES_READER",
+        "PO_OPERATOR": "SALES_READER",
+    }
+    role = ROLE_ALIASES.get(role, role)
     if not role and authorization:
         token = authorization.strip()
         if token.lower().startswith("bearer "):

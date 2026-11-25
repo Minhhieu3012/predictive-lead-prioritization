@@ -188,7 +188,8 @@ def compute_daily_monitoring_snapshot(
         ws = enquiries_df["workflow_state"].fillna("").astype(str).str.upper()
         unscored_mask = unscored_mask | ws.isin(["UNSCORED", "QUARANTINED"])
     if "spec_completeness" in enquiries_df.columns:
-        unscored_mask = unscored_mask | enquiries_df["spec_completeness"].isna()
+        sc = enquiries_df["spec_completeness"].fillna("").astype(str).str.strip().str.lower()
+        unscored_mask = unscored_mask | sc.isin(["", "null", "none", "nan", "unknown"])
 
     scored_count = int((~unscored_mask).sum())
     score_coverage_pct = round((scored_count / total_rows) * 100.0, 2)
@@ -226,6 +227,7 @@ def compute_daily_monitoring_snapshot(
         "recommended_fallback_to_rules": investigation_triggered,
         "alerts": alerts,
         "auto_retrain_enabled": False,
+        "auto_retrain_allowed": False,
         "accuracy_assessment_status": "DEFERRED_UNTIL_60D_MATURITY",
     }
 

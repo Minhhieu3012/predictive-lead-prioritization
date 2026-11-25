@@ -48,20 +48,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "ops:exit_export",
         "rbac:manage",
     },
-    "STAFF": {
-        "queue:read",
-        "explanations:read",
-        "workspace:review",
-        "workspace:override",
-    },
-    "PO_OPERATOR": {
-        "queue:read",
-        "explanations:read",
-        "workspace:review",
-        "workspace:override",
-        "workspace:block",
-        "incident:hold",
-    },
 }
 
 

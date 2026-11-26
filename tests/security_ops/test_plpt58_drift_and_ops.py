@@ -114,3 +114,22 @@ def test_sprint5_ops_backup_restore_replay_and_portable_exit(tmp_path: Path):
     assert "blocked_accounts" in exit_bundle["tables"]
     assert exit_bundle["tables"]["clean_enquiries"]["row_count"] == 1
 
+
+
+def test_plpt74_daily_drift_snapshot_persistence_and_no_auto_retrain(tmp_path: Path):
+    from src.monitoring.drift_monitor import persist_daily_drift_snapshot
+
+    db_path = tmp_path / "plpt74.db"
+    df = pd.DataFrame(
+        [
+            {"enquiry_id": f"D-{i}", "product_family": "Motor_DongCo", "spec_completeness": "" if i < 2 else "Full", "source": "Website"}
+            for i in range(10)
+        ]
+    )
+    snap = compute_daily_monitoring_snapshot(df, reference_missingness_pct={"spec_completeness": 5.0}, as_of_date="2026-11-26")
+    row_id = persist_daily_drift_snapshot(str(db_path), snap)
+    assert row_id == 1
+
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        row = conn.execute("SELECT score_coverage_pct, investigation_triggered, auto_retrain_allowed FROM daily_drift_snapshots WHERE id = 1").fetchone()
+        assert row == (80.0, 1, 0)

@@ -7,6 +7,18 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
+def _auth_headers(client: TestClient, role: str, user_id: str | None = None, *, expired: bool = False) -> dict[str, str]:
+    from src.security.auth import DEFAULT_SESSION_STORE
+    DEFAULT_SESSION_STORE._sessions.clear()
+    uid = user_id or f"test_{role.lower()}"
+    res = client.post("/auth/login", json={"user_id": uid, "role": role})
+    assert res.status_code == 200, res.text
+    hdrs = {"Authorization": f"Bearer {res.json()['token']}"}
+    if expired:
+        hdrs["X-Session-Expired"] = "true"
+    return hdrs
+
+
 from src.api.main import app
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -103,7 +115,7 @@ def test_emergency_block_removes_record_and_reindexes_rank(tmp_path, monkeypatch
 
     client = TestClient(app)
 
-    before = client.get("/api/queue?limit=10", headers={"X-User-Role": "SALES_READER"}).json()
+    before = client.get("/api/queue?limit=10", headers=_auth_headers(client, "SALES_READER")).json()
     assert before["status"] == "OK"
     assert before["total"] == 3
     assert before["items"][0]["enquiry_id"] == "SN-0001"
@@ -116,12 +128,12 @@ def test_emergency_block_removes_record_and_reindexes_rank(tmp_path, monkeypatch
             "account_key": "ACCT-0001",
             "reason": "PO emergency block test",
         },
-        headers={"X-User-Role": "SUPERVISOR"},
+        headers=_auth_headers(client, "SUPERVISOR"),
     )
     assert block_res.status_code == 200
     assert block_res.json()["blocked"] is True
 
-    after = client.get("/api/queue?limit=10", headers={"X-User-Role": "SALES_READER"}).json()
+    after = client.get("/api/queue?limit=10", headers=_auth_headers(client, "SALES_READER")).json()
     assert after["status"] == "OK"
     assert after["total"] == 2
     assert all(item["enquiry_id"] != "SN-0001" for item in after["items"])
@@ -136,7 +148,7 @@ def test_stale_data_locks_queue_after_24_hours(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)
-    res = client.get("/api/queue?limit=10", headers={"X-User-Role": "SALES_READER"})
+    res = client.get("/api/queue?limit=10", headers=_auth_headers(client, "SALES_READER"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "HOLD_STALE_DATA"
@@ -154,7 +166,7 @@ def test_fresh_data_preserves_total_and_backward_compatible_keys(tmp_path, monke
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)
-    res = client.get("/api/queue?limit=1", headers={"X-User-Role": "SALES_READER"})
+    res = client.get("/api/queue?limit=1", headers=_auth_headers(client, "SALES_READER"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "OK"
@@ -175,7 +187,7 @@ def test_empty_non_closed_queue_holds_stale_data(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)
-    res = client.get("/api/queue?limit=10", headers={"X-User-Role": "SALES_READER"})
+    res = client.get("/api/queue?limit=10", headers=_auth_headers(client, "SALES_READER"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "HOLD_STALE_DATA"
@@ -198,7 +210,7 @@ def test_missing_or_invalid_extraction_time_holds_stale_data(tmp_path, monkeypat
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     client = TestClient(app)
-    res = client.get("/api/queue?limit=10", headers={"X-User-Role": "SALES_READER"})
+    res = client.get("/api/queue?limit=10", headers=_auth_headers(client, "SALES_READER"))
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "HOLD_STALE_DATA"

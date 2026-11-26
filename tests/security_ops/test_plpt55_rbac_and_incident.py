@@ -137,3 +137,74 @@ def test_plpt55_env_separation_and_secret_management(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
     assert len(get_session_secret_key()) == 40
 
+
+
+def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monkeypatch):
+    from datetime import datetime
+    from fastapi.testclient import TestClient
+    from src.api.main import app
+    from src.security.auth import DEFAULT_SESSION_STORE
+    from tests.control_fixtures.fixtures_data import create_clean_db, make_cf_row
+
+    db_path = tmp_path / "plpt62.db"
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    rows = [
+        make_cf_row(enquiry_id="E-A1", account_key="ACCT-A", t0_time=now_iso, extraction_time=now_iso, feature_event_time=now_iso, feature_available_at=now_iso),
+        make_cf_row(enquiry_id="E-B1", account_key="ACCT-B", t0_time=now_iso, extraction_time=now_iso, feature_event_time=now_iso, feature_available_at=now_iso),
+    ]
+    create_clean_db(db_path, rows)
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path / "q"))
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "false")
+    DEFAULT_SESSION_STORE._sessions.clear()
+
+    client = TestClient(app)
+
+    # Chặn Direct URL / X-User-Role thô -> 401
+    assert client.get("/api/v1/workspace/queue").status_code == 401
+    assert client.get("/api/v1/workspace/queue", headers={"X-User-Role": "ADMINISTRATOR"}).status_code == 401
+
+    # Login ADMIN & cấp tài khoản theo team/account
+    admin_tok = client.post("/auth/login", json={"user_id": "admin_01", "role": "ADMINISTRATOR"}).json()["token"]
+    r_acc = client.post(
+        "/admin/accounts",
+        json={"user_id": "sales_a", "role": "SALES_READER", "team_id": "TEAM-A", "assigned_accounts": ["ACCT-A"]},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    )
+    assert r_acc.status_code == 200
+    sales_tok = client.post("/auth/login", json={"user_id": "sales_a"}).json()["token"]
+
+    # Lọc đúng ACCT-A và chặn IDOR sang E-B1 (403)
+    q_sales = client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()
+    assert q_sales["total"] == 1 and q_sales["items"][0]["account_key"] == "ACCT-A"
+    assert client.post(
+        "/api/v1/workspace/review",
+        json={"enquiry_id": "E-B1", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True},
+        headers={"Authorization": f"Bearer {sales_tok}"},
+    ).status_code == 403
+
+    # Phân quyền 403 cho SALES_READER gọi /admin/security-readiness
+    assert client.get("/admin/security-readiness", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 403
+    assert client.get("/admin/security-readiness", headers={"Authorization": f"Bearer {admin_tok}"}).status_code == 200
+
+    # Incident hold khóa hàng đợi & notify 4h SLA
+    hold = client.post(
+        "/admin/incident-hold",
+        json={"action": "activate", "reason": "PLPT-62 test", "severity": "CRITICAL"},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    ).json()
+    assert client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()["locked"] is True
+    assert client.post(
+        "/admin/incident-hold",
+        json={"action": "notify", "incident_id": hold["incident_id"]},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    ).json()["within_4h_sla"] is True
+    assert client.post(
+        "/admin/incident-hold",
+        json={"action": "release", "incident_id": hold["incident_id"], "resolution_note": "OK"},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    ).json()["status"] == "RESOLVED"
+
+    # Logout ghi revoked_sessions -> dùng lại bị 401
+    assert client.post("/auth/logout", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 200
+    assert client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 401

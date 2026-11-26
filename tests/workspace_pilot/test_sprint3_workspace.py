@@ -7,6 +7,18 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
+def _auth_headers(client: TestClient, role: str, user_id: str | None = None, *, expired: bool = False) -> dict[str, str]:
+    from src.security.auth import DEFAULT_SESSION_STORE
+    DEFAULT_SESSION_STORE._sessions.clear()
+    uid = user_id or f"test_{role.lower()}"
+    res = client.post("/auth/login", json={"user_id": uid, "role": role})
+    assert res.status_code == 200, res.text
+    hdrs = {"Authorization": f"Bearer {res.json()['token']}"}
+    if expired:
+        hdrs["X-Session-Expired"] = "true"
+    return hdrs
+
+
 from src.api.main import app
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -77,7 +89,7 @@ def test_workspace_k_allocation_and_10pct_exploration(tmp_path: Path, monkeypatc
     monkeypatch.setenv("EXPLORATION_SEED", "42")
 
     client = TestClient(app)
-    res = client.get("/api/v1/workspace/queue?limit=50", headers={"X-User-Role": "SALES_READER"})
+    res = client.get("/api/v1/workspace/queue?limit=50", headers=_auth_headers(client, "SALES_READER"))
     assert res.status_code == 200
     body = res.json()
     assert body["capacity_k"] == 20
@@ -102,7 +114,7 @@ def test_workspace_tier0_overload_sets_zero_exploration(tmp_path: Path, monkeypa
     monkeypatch.setenv("DAILY_CAPACITY_K", "25")
 
     client = TestClient(app)
-    res = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "SUPERVISOR"})
+    res = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "SUPERVISOR"))
     assert res.status_code == 200
     body = res.json()
     assert body["capacity_k"] == 25
@@ -126,25 +138,25 @@ def test_workspace_rbac_401_403_and_vn_diacritic_search(tmp_path: Path, monkeypa
     assert client.get("/api/v1/workspace/queue").status_code == 401
     assert client.get(
         "/api/v1/workspace/queue",
-        headers={"X-User-Role": "SALES_READER", "X-Session-Expired": "true"},
+        headers=_auth_headers(client, "SALES_READER", expired=True),
     ).status_code == 401
 
     # 403 khi vai trò không được phép
     assert client.post(
         "/api/v1/workspace/override",
         json={"enquiry_id": "SN-0001", "override_reason_code": "OTHER_VERIFIED", "justification": "test"},
-        headers={"X-User-Role": "DATA_STEWARD"},
+        headers=_auth_headers(client, "DATA_STEWARD"),
     ).status_code == 403
     assert client.post(
         "/api/block",
         json={"enquiry_id": "SN-0001"},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     ).status_code == 403
 
     # Tìm kiếm không dấu tiếng Việt: "dong co" khớp "Motor_DongCo"
     res = client.get(
         "/api/v1/workspace/queue?q=dong%20co",
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert res.status_code == 200
     items = res.json()["items"]
@@ -164,7 +176,7 @@ def test_workspace_override_and_review_isolation(tmp_path: Path, monkeypatch):
     bad = client.post(
         "/api/v1/workspace/override",
         json={"enquiry_id": "SN-0001", "override_reason_code": "CUSTOMER_URGENT_CALLBACK", "justification": ""},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert bad.status_code == 400
 
@@ -176,7 +188,7 @@ def test_workspace_override_and_review_isolation(tmp_path: Path, monkeypatch):
             "override_reason_code": "CUSTOMER_URGENT_CALLBACK",
             "justification": "Khach goi gap thay the motor dung chuyen",
         },
-        headers={"X-User-Role": "SALES_READER", "X-User-Id": "sales_01"},
+        headers=_auth_headers(client, "SALES_READER", user_id="sales_01"),
     )
     assert ok.status_code == 200
     assert ok.json()["isolated_from_outcome_events"] is True
@@ -185,14 +197,14 @@ def test_workspace_override_and_review_isolation(tmp_path: Path, monkeypatch):
     bad_rev = client.post(
         "/api/v1/workspace/review",
         json={"enquiry_id": "SN-0001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": False, "contact_attempted": True},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert bad_rev.status_code == 400
 
     ok_rev = client.post(
         "/api/v1/workspace/review",
         json={"enquiry_id": "SN-0001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True, "contact_attempted": True},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert ok_rev.status_code == 200
 
@@ -212,7 +224,7 @@ def test_serving_mode_locked_to_fallback_until_gate_g1(tmp_path: Path, monkeypat
     monkeypatch.setenv("GATE_G1_APPROVED", "false")
 
     client = TestClient(app)
-    res = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "MODEL_REVIEWER"})
+    res = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "MODEL_REVIEWER"))
     assert res.status_code == 200
     assert res.json()["scoring_mode"] == "FALLBACK_RULES_BASELINE"
 
@@ -227,13 +239,13 @@ def test_workspace_block_alias_syncs_both_queues(tmp_path: Path, monkeypatch):
     res_block = client.post(
         "/api/v1/workspace/block",
         json={"enquiry_id": "SN-0001", "reason": "Test alias block"},
-        headers={"X-User-Role": "SUPERVISOR"},
+        headers=_auth_headers(client, "SUPERVISOR"),
     )
     assert res_block.status_code == 200
     assert res_block.json()["blocked"] is True
 
-    q_legacy = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
-    q_v1 = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    q_legacy = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
+    q_v1 = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert q_legacy["total"] == 4
     assert q_v1["total"] == 4
     assert all(item["enquiry_id"] != "SN-0001" for item in q_legacy["items"])
@@ -249,7 +261,7 @@ def test_workspace_edge_cases_k_and_pagination(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(db_lt))
     monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path))
     monkeypatch.setenv("DAILY_CAPACITY_K", "25")
-    r1 = client.get("/api/v1/workspace/queue?limit=50", headers={"X-User-Role": "SALES_READER"}).json()
+    r1 = client.get("/api/v1/workspace/queue?limit=50", headers=_auth_headers(client, "SALES_READER")).json()
     assert r1["total"] == 8 and len(r1["items"]) == 8 and r1["exploration_slots_allocated"] == 0
 
     # Case 2: K=3 (< 5) -> exploration_slots_allocated = 0
@@ -257,7 +269,7 @@ def test_workspace_edge_cases_k_and_pagination(tmp_path: Path, monkeypatch):
     _seed_workspace_db(db_k3, count=10, urgent_count=0, days_ago_t0=1)
     monkeypatch.setenv("DATABASE_PATH", str(db_k3))
     monkeypatch.setenv("DAILY_CAPACITY_K", "3")
-    r2 = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    r2 = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert r2["capacity_k"] == 3 and r2["total"] == 3 and r2["exploration_slots_allocated"] == 0
 
     # Case 3: thiếu ứng viên exploration (K=25 -> K_ranked=23, total=23 -> remaining_pool=0 -> explore=0)
@@ -265,7 +277,7 @@ def test_workspace_edge_cases_k_and_pagination(tmp_path: Path, monkeypatch):
     _seed_workspace_db(db_no_pool, count=23, urgent_count=0, days_ago_t0=1)
     monkeypatch.setenv("DATABASE_PATH", str(db_no_pool))
     monkeypatch.setenv("DAILY_CAPACITY_K", "25")
-    r3 = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    r3 = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert r3["total"] == 23 and r3["exploration_slots_allocated"] == 0
 
     # Case 4: limit=10 khi K=25 (total=30) -> chỉ cắt trang 10 item, tập K vẫn giữ 25 (exploration=round(0.1*25)=2)
@@ -273,7 +285,7 @@ def test_workspace_edge_cases_k_and_pagination(tmp_path: Path, monkeypatch):
     _seed_workspace_db(db_pag, count=30, urgent_count=0, days_ago_t0=1)
     monkeypatch.setenv("DATABASE_PATH", str(db_pag))
     monkeypatch.setenv("DAILY_CAPACITY_K", "25")
-    r4 = client.get("/api/v1/workspace/queue?page=1&limit=10", headers={"X-User-Role": "SALES_READER"}).json()
+    r4 = client.get("/api/v1/workspace/queue?page=1&limit=10", headers=_auth_headers(client, "SALES_READER")).json()
     assert r4["capacity_k"] == 25
     assert r4["total"] == 25
     assert r4["exploration_slots_allocated"] == 2
@@ -288,7 +300,7 @@ def test_workspace_override_reorders_final_work_order_and_tab_separation(tmp_pat
     monkeypatch.setenv("DAILY_CAPACITY_K", "5")
 
     client = TestClient(app)
-    before = client.get("/api/v1/workspace/queue?view=active", headers={"X-User-Role": "SALES_READER"}).json()["items"]
+    before = client.get("/api/v1/workspace/queue?view=active", headers=_auth_headers(client, "SALES_READER")).json()["items"]
     last_item = before[-1]
     assert last_item["final_work_order"] == 5
 
@@ -296,18 +308,18 @@ def test_workspace_override_reorders_final_work_order_and_tab_separation(tmp_pat
     ov = client.post(
         "/api/v1/workspace/override",
         json={"enquiry_id": last_item["enquiry_id"], "override_reason_code": "CUSTOMER_URGENT_CALLBACK", "justification": "Uu tien goi lai"},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert ov.status_code == 200
 
-    after = client.get("/api/v1/workspace/queue?view=active", headers={"X-User-Role": "SALES_READER"}).json()["items"]
+    after = client.get("/api/v1/workspace/queue?view=active", headers=_auth_headers(client, "SALES_READER")).json()["items"]
     promoted = [x for x in after if x["enquiry_id"] == last_item["enquiry_id"]][0]
     assert promoted["final_work_order"] == 1
     assert promoted["model_rank"] == last_item["model_rank"]
     assert promoted["rules_override"] is True
 
     # Kiểm tra Active và Unscored không trùng hồ sơ
-    unsc = client.get("/api/v1/workspace/queue?view=unscored", headers={"X-User-Role": "SALES_READER"}).json()["items"]
+    unsc = client.get("/api/v1/workspace/queue?view=unscored", headers=_auth_headers(client, "SALES_READER")).json()["items"]
     act_ids = {x["enquiry_id"] for x in after}
     unsc_ids = {x["enquiry_id"] for x in unsc}
     assert len(act_ids & unsc_ids) == 0
@@ -325,13 +337,13 @@ def test_workspace_all_5_roles_and_100_req_5_sessions_p95(tmp_path: Path, monkey
 
     client = TestClient(app)
     for role in ("SALES_READER", "SUPERVISOR", "DATA_STEWARD", "MODEL_REVIEWER", "ADMINISTRATOR"):
-        res = client.get("/api/v1/workspace/queue", headers={"X-User-Role": role})
+        res = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, role))
         assert res.status_code == 200
 
     # Kiểm tra đo tải 100 request qua 5 phiên đồng thời p95 <= 3.0s
     def _call(_):
         t0 = time.perf_counter()
-        r = client.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"})
+        r = client.get("/api/v1/workspace/queue", headers=_auth_headers(client, "SALES_READER"))
         assert r.status_code == 200
         return time.perf_counter() - t0
 
@@ -350,9 +362,9 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("EXPLORATION_SEED", "42")
 
     client = TestClient(app)
-    all_items = client.get("/api/v1/workspace/queue?view=active&include_overflow=true&limit=50", headers={"X-User-Role": "SALES_READER"}).json()["items"]
+    all_items = client.get("/api/v1/workspace/queue?view=active&include_overflow=true&limit=50", headers=_auth_headers(client, "SALES_READER")).json()["items"]
     assert len(all_items) == 7
-    unsc_items = client.get("/api/v1/workspace/queue?view=unscored", headers={"X-User-Role": "SALES_READER"}).json()["items"]
+    unsc_items = client.get("/api/v1/workspace/queue?view=unscored", headers=_auth_headers(client, "SALES_READER")).json()["items"]
     assert len(unsc_items) == 3 and all(x["spec_completeness"] == "Minimal" for x in unsc_items)
     overflow_one = [x for x in all_items if x["allocation_type"] == "OVERFLOW_OUTSIDE_K"][0]
 
@@ -360,11 +372,11 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     ov = client.post(
         "/api/v1/workspace/override",
         json={"enquiry_id": overflow_one["enquiry_id"], "override_reason_code": "CUSTOMER_URGENT_CALLBACK", "justification": "Khach goi gap"},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     )
     assert ov.status_code == 200
 
-    top_k = client.get("/api/v1/workspace/queue?view=active", headers={"X-User-Role": "SALES_READER"}).json()
+    top_k = client.get("/api/v1/workspace/queue?view=active", headers=_auth_headers(client, "SALES_READER")).json()
     assert top_k["total"] == 5
     assert top_k["items"][0]["enquiry_id"] == overflow_one["enquiry_id"]
     assert top_k["items"][0]["final_work_order"] == 1
@@ -374,15 +386,15 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     assert client.post(
         "/api/v1/workspace/review",
         json={"enquiry_id": "NOT-EXIST", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     ).status_code == 404
 
     # Hồ sơ bị block -> 409
-    assert client.post("/api/block", json={"enquiry_id": "SN-0002"}, headers={"X-User-Role": "SUPERVISOR"}).status_code == 200
+    assert client.post("/api/block", json={"enquiry_id": "SN-0002"}, headers=_auth_headers(client, "SUPERVISOR")).status_code == 200
     assert client.post(
         "/api/v1/workspace/override",
         json={"enquiry_id": "SN-0002", "override_reason_code": "OTHER_VERIFIED", "justification": "test"},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     ).status_code == 409
 
     # Đồng bộ is_overloaded ở Unscored và chặn ghi khi HOLD_STALE_DATA (423)
@@ -390,7 +402,7 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     _seed_workspace_db(db_stale, count=6, urgent_count=6, days_ago_t0=1)
     monkeypatch.setenv("DATABASE_PATH", str(db_stale))
     monkeypatch.setenv("DAILY_CAPACITY_K", "5")
-    unsc_res = client.get("/api/v1/workspace/queue?view=unscored", headers={"X-User-Role": "SALES_READER"}).json()
+    unsc_res = client.get("/api/v1/workspace/queue?view=unscored", headers=_auth_headers(client, "SALES_READER")).json()
     assert unsc_res["is_overloaded"] is True
 
     with contextlib.closing(sqlite3.connect(str(db_stale))) as conn:
@@ -401,7 +413,7 @@ def test_override_outside_top_k_and_write_guards(tmp_path: Path, monkeypatch):
     assert client.post(
         "/api/v1/workspace/review",
         json={"enquiry_id": "SN-0001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True},
-        headers={"X-User-Role": "SALES_READER"},
+        headers=_auth_headers(client, "SALES_READER"),
     ).status_code == 423
 
 

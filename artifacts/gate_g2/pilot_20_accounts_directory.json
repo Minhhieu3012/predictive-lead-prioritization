@@ -1,0 +1,182 @@
+{
+  "max_named_users": 20,
+  "max_concurrent_sessions": 5,
+  "accounts": [
+    {
+      "stt": 1,
+      "user_id": "sales_north_01",
+      "role": "SALES_READER",
+      "team_id": "TEAM-NORTH",
+      "assigned_accounts": [
+        "ACCT-N01",
+        "ACCT-N02"
+      ]
+    },
+    {
+      "stt": 2,
+      "user_id": "sales_north_02",
+      "role": "SALES_READER",
+      "team_id": "TEAM-NORTH",
+      "assigned_accounts": [
+        "ACCT-N03",
+        "ACCT-N04"
+      ]
+    },
+    {
+      "stt": 3,
+      "user_id": "sales_north_03",
+      "role": "SALES_READER",
+      "team_id": "TEAM-NORTH",
+      "assigned_accounts": [
+        "ACCT-N05",
+        "ACCT-N06"
+      ]
+    },
+    {
+      "stt": 4,
+      "user_id": "sales_north_04",
+      "role": "SALES_READER",
+      "team_id": "TEAM-NORTH",
+      "assigned_accounts": [
+        "ACCT-N07",
+        "ACCT-N08"
+      ]
+    },
+    {
+      "stt": 5,
+      "user_id": "sales_central_01",
+      "role": "SALES_READER",
+      "team_id": "TEAM-CENTRAL",
+      "assigned_accounts": [
+        "ACCT-C01",
+        "ACCT-C02"
+      ]
+    },
+    {
+      "stt": 6,
+      "user_id": "sales_central_02",
+      "role": "SALES_READER",
+      "team_id": "TEAM-CENTRAL",
+      "assigned_accounts": [
+        "ACCT-C03",
+        "ACCT-C04"
+      ]
+    },
+    {
+      "stt": 7,
+      "user_id": "sales_central_03",
+      "role": "SALES_READER",
+      "team_id": "TEAM-CENTRAL",
+      "assigned_accounts": [
+        "ACCT-C05",
+        "ACCT-C06"
+      ]
+    },
+    {
+      "stt": 8,
+      "user_id": "sales_south_01",
+      "role": "SALES_READER",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": [
+        "ACCT-S01",
+        "ACCT-S02"
+      ]
+    },
+    {
+      "stt": 9,
+      "user_id": "sales_south_02",
+      "role": "SALES_READER",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": [
+        "ACCT-S03",
+        "ACCT-S04"
+      ]
+    },
+    {
+      "stt": 10,
+      "user_id": "sales_south_03",
+      "role": "SALES_READER",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": [
+        "ACCT-S05",
+        "ACCT-S06"
+      ]
+    },
+    {
+      "stt": 11,
+      "user_id": "sales_south_04",
+      "role": "SALES_READER",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": [
+        "ACCT-S07",
+        "ACCT-S08"
+      ]
+    },
+    {
+      "stt": 12,
+      "user_id": "sales_south_05",
+      "role": "SALES_READER",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": [
+        "ACCT-S09",
+        "ACCT-S10"
+      ]
+    },
+    {
+      "stt": 13,
+      "user_id": "sup_north_01",
+      "role": "SUPERVISOR",
+      "team_id": "TEAM-NORTH",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 14,
+      "user_id": "sup_central_01",
+      "role": "SUPERVISOR",
+      "team_id": "TEAM-CENTRAL",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 15,
+      "user_id": "sup_south_01",
+      "role": "SUPERVISOR",
+      "team_id": "TEAM-SOUTH",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 16,
+      "user_id": "steward_01",
+      "role": "DATA_STEWARD",
+      "team_id": "GLOBAL",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 17,
+      "user_id": "steward_02",
+      "role": "DATA_STEWARD",
+      "team_id": "GLOBAL",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 18,
+      "user_id": "reviewer_01",
+      "role": "MODEL_REVIEWER",
+      "team_id": "GLOBAL",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 19,
+      "user_id": "reviewer_02",
+      "role": "MODEL_REVIEWER",
+      "team_id": "GLOBAL",
+      "assigned_accounts": []
+    },
+    {
+      "stt": 20,
+      "user_id": "admin_01",
+      "role": "ADMINISTRATOR",
+      "team_id": "GLOBAL",
+      "assigned_accounts": []
+    }
+  ]
+}

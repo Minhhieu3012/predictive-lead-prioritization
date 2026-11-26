@@ -6,6 +6,18 @@ import contextlib
 import sqlite3
 
 from fastapi.testclient import TestClient
+
+def _auth_headers(client: TestClient, role: str, user_id: str | None = None, *, expired: bool = False) -> dict[str, str]:
+    from src.security.auth import DEFAULT_SESSION_STORE
+    DEFAULT_SESSION_STORE._sessions.clear()
+    uid = user_id or f"test_{role.lower()}"
+    res = client.post("/auth/login", json={"user_id": uid, "role": role})
+    assert res.status_code == 200, res.text
+    hdrs = {"Authorization": f"Bearer {res.json()['token']}"}
+    if expired:
+        hdrs["X-Session-Expired"] = "true"
+    return hdrs
+
 import pandas as pd
 
 from src.api.main import app
@@ -103,7 +115,7 @@ def test_upsert_new_to_closed_and_block_older_snapshot(tmp_path, monkeypatch):
 
     deduplicator.deduplicate_enquiries(db_path)
     client = TestClient(app)
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert res["total"] == 0
     assert res["items"] == []
 
@@ -157,7 +169,7 @@ def test_withdrawn_excluded_from_queue_and_quarantine_count(tmp_path, monkeypatc
     deduplicator.deduplicate_enquiries(db_path)
 
     client = TestClient(app)
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert res["status"] == "OK"
     assert res["total"] == 1
     assert [i["enquiry_id"] for i in res["items"]] == ["SN-OPEN"]
@@ -224,7 +236,7 @@ def test_default_limit_is_25_and_quarantine_count(tmp_path, monkeypatch):
     deduplicator.deduplicate_enquiries(db_path)
 
     client = TestClient(app)
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert res["status"] == "OK"
     assert res["total"] == 30
     assert len(res["items"]) == 25
@@ -304,7 +316,7 @@ def test_closed_does_not_swallow_new_open_and_60d_window(tmp_path, monkeypatch):
             assert ext_merged == ext_new
 
     client = TestClient(app)
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     ids = [i["enquiry_id"] for i in res["items"]]
     assert "SN-OPEN-DUP" in ids
     assert "SN-OVER-60D" in ids
@@ -353,9 +365,9 @@ def test_block_single_enquiry_even_when_account_key_sent(tmp_path, monkeypatch):
 
     client = TestClient(app)
     # Gửi cả enquiry_id và account_key nhưng không bật block_scope="account" -> chỉ chặn SN-A1
-    blk = client.post("/api/block", json={"enquiry_id": "SN-A1", "account_key": "ACCT-A", "reason": "Test single"}, headers={"X-User-Role": "SUPERVISOR"})
+    blk = client.post("/api/block", json={"enquiry_id": "SN-A1", "account_key": "ACCT-A", "reason": "Test single"}, headers=_auth_headers(client, "SUPERVISOR"))
     assert blk.status_code == 200
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert [i["enquiry_id"] for i in res["items"]] == ["SN-A2"]
 
 
@@ -446,7 +458,7 @@ def test_reingest_broken_active_enquiry_hides_from_queue(tmp_path, monkeypatch):
     csv_validator.validate_and_load()
 
     client = TestClient(app)
-    res = client.get("/api/queue", headers={"X-User-Role": "SALES_READER"}).json()
+    res = client.get("/api/queue", headers=_auth_headers(client, "SALES_READER")).json()
     assert res["total"] == 0
     assert res["items"] == []
     assert res["quarantine_count"] == 1  # SN-REINGEST gộp trùng giữa quarantine_rows và quarantine_outcomes

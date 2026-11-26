@@ -93,13 +93,19 @@ def test_ops03_workspace_queue_p95_under_3s_five_concurrent_sessions(tmp_path: P
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
     monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path / "q"))
 
+    from src.security.auth import DEFAULT_SESSION_STORE
+    DEFAULT_SESSION_STORE._sessions.clear()
     client = TestClient(app)
+    tokens = [
+        client.post("/auth/login", json={"user_id": f"sales_{i}", "role": "SALES_READER"}).json()["token"]
+        for i in range(5)
+    ]
 
     def _call_once(_idx: int) -> tuple[int, float]:
         t_start = time.perf_counter()
         resp = client.get(
             "/api/v1/workspace/queue?view=active&limit=25",
-            headers={"X-User-Role": "SALES_READER", "X-User-Id": f"sales_{_idx % 5}"},
+            headers={"Authorization": f"Bearer {tokens[_idx % 5]}"},
         )
         elapsed = time.perf_counter() - t_start
         return resp.status_code, elapsed

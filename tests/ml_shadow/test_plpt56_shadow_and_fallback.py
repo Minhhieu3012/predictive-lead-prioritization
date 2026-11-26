@@ -180,3 +180,59 @@ def test_plpt56_shadow_runner_isolation_and_router_auto_fallback(tmp_path: Path)
     assert routed["route"]["active_mode"] == DEFAULT_SERVING_MODE
     assert routed["items"][0]["shadow_score_logged"] == pytest.approx(0.77)
 
+
+
+def test_plpt66_http_shadow_summary_fallback_and_failed_partial_guard(tmp_path: Path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.api.main import app
+    from src.models.shadow_runner import run_shadow_batch_with_audit
+    from src.models.train_candidates import register_model_in_registry
+    from src.security.auth import DEFAULT_SESSION_STORE
+
+    db_path = tmp_path / "plpt66.db"
+    row = make_cf_row(enquiry_id="SH-66", account_key="ACCT-66")
+    create_clean_db(db_path, [row])
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path / "q"))
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "false")
+    DEFAULT_SESSION_STORE._sessions.clear()
+
+    # Registry & FAILED_PARTIAL guard
+    reg = register_model_in_registry(
+        db_path,
+        {
+            "model_version": "plpt-logreg-v1.0.0",
+            "candidate_type": "REGULARIZED_LOGISTIC_REGRESSION",
+            "random_seed": 42,
+            "training_cutoff_t0": "2026-08-31T23:59:59+07:00",
+            "training_row_count": 1000,
+            "feature_dictionary_hash": "sha256:abc",
+            "preprocessor_hash": "sha256:def",
+            "data_origin": "SYNTHETIC",
+        },
+        sealed_test_count=200,
+    )
+    assert reg["auto_retrain_allowed"] is False
+
+    feat_df, cols = build_pre_t0_features(pd.DataFrame([row]), strict_leakage=True)
+    prep = TabularPreprocessor(cols).fit(feat_df)
+    model = RegularizedLogisticRegressionModel().fit(prep.transform(feat_df), np.array([1.0]))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"model_version": "plpt-logreg-v1.0.0", "serving_mode_locked": "RULES_BASELINE"}), encoding="utf-8")
+
+    fail_res = run_shadow_batch_with_audit(db_path, manifest_path, model, prep, simulate_partial_failure=True)
+    assert fail_res["status"] == "FAILED_PARTIAL" and fail_res["scores_persisted"] is False
+
+    ok_res = run_shadow_batch_with_audit(db_path, manifest_path, model, prep, simulate_partial_failure=False)
+    assert ok_res["status"] == "SUCCESS" and ok_res["scores_persisted"] is True
+
+    # HTTP /shadow/summary & /shadow/fallback RBAC
+    client = TestClient(app)
+    sales_tok = client.post("/auth/login", json={"user_id": "sales_66", "role": "SALES_READER"}).json()["token"]
+    rev_tok = client.post("/auth/login", json={"user_id": "rev_66", "role": "MODEL_REVIEWER"}).json()["token"]
+
+    assert client.get("/shadow/summary", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 403
+    r_sum = client.get("/shadow/summary", headers={"Authorization": f"Bearer {rev_tok}"})
+    assert r_sum.status_code == 200 and r_sum.json()["shadow_score_logs_count"] == 1
+    r_fb = client.post("/shadow/fallback", json={"drift_fallback_triggered": True}, headers={"Authorization": f"Bearer {rev_tok}"})
+    assert r_fb.status_code == 200 and r_fb.json()["active_mode"] == FALLBACK_SERVING_MODE

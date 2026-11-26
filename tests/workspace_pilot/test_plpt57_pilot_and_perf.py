@@ -119,3 +119,47 @@ def test_ops03_workspace_queue_p95_under_3s_five_concurrent_sessions(tmp_path: P
     p95_seconds = float(np.percentile(latencies, 95))
     assert p95_seconds <= 3.0, f"Workspace p95={p95_seconds:.3f}s vượt ngưỡng 3.0s (OPS-03)"
 
+
+
+def test_plpt70_http_pilot_effort_and_telemetry_endpoints(tmp_path: Path, monkeypatch):
+    from src.security.auth import DEFAULT_SESSION_STORE
+
+    db_path = tmp_path / "plpt70.db"
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    create_clean_db(db_path, [make_cf_row(enquiry_id="P-01", account_key="ACCT-P1", t0_time=now_iso, extraction_time=now_iso, feature_event_time=now_iso, feature_available_at=now_iso)])
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path / "q"))
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "false")
+    DEFAULT_SESSION_STORE._sessions.clear()
+
+    client = TestClient(app)
+    assert client.get("/pilot/telemetry").status_code == 401
+    sales_tok = client.post("/auth/login", json={"user_id": "sales_70", "role": "SALES_READER"}).json()["token"]
+    steward_tok = client.post("/auth/login", json={"user_id": "steward_70", "role": "DATA_STEWARD"}).json()["token"]
+    assert client.post("/pilot/effort", json={"enquiries_reviewed": 1}, headers={"Authorization": f"Bearer {steward_tok}"}).status_code == 403
+
+    r_eff = client.post(
+        "/pilot/effort",
+        json={
+            "enquiry_id": "P-01",
+            "account_key": "ACCT-P1",
+            "project_ref_code": "PRJ-01",
+            "business_date": "2026-10-01",
+            "enquiries_reviewed": 10,
+            "queue_prep_minutes": 5.0,
+            "triage_duration_seconds": 1800.0,
+            "due_total": 10,
+            "due_on_time": 10,
+            "override_count": 1,
+        },
+        headers={"Authorization": f"Bearer {sales_tok}"},
+    )
+    assert r_eff.status_code == 200 and r_eff.json()["exposure_log_id"] == 1
+
+    r_tel = client.get("/pilot/telemetry", headers={"Authorization": f"Bearer {sales_tok}"})
+    assert r_tel.status_code == 200
+    tel = r_tel.json()
+    assert tel["observed_business_days"] == 1
+    assert tel["effort_reduction_pct"] > 20.0
+    assert tel["pilot_assignments_count"] == 1
+    assert tel["exposure_logs_count"] == 1

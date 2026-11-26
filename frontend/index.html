@@ -64,6 +64,7 @@
         <button class="tab-btn active" data-view="active" type="button">Active (K)</button>
         <button class="tab-btn" data-view="unscored" type="button">Unscored</button>
         <button class="tab-btn" data-view="quarantine" type="button">Quarantine</button>
+        <button class="tab-btn" data-view="monitoring" type="button">Monitoring</button>
         <select id="overflow-toggle" class="overflow-select">
           <option value="false">Chỉ Top-K hôm nay</option>
           <option value="true">Toàn bộ hàng đợi đã chấm điểm</option>
@@ -89,6 +90,28 @@
           <button id="btn-submit-block" type="button" class="btn-danger">Chặn khẩn cấp</button>
         </div>
         <div id="action-msg" class="msg"></div>
+      </div>
+
+      <div id="pilot-telemetry-panel" class="card" style="margin-bottom:12px;">
+        <strong>Tiến độ Pilot 20 ngày làm việc (PLPT-69):</strong>
+        <span id="pilot-telemetry-summary">Đang tải telemetry...</span>
+      </div>
+
+      <div id="monitoring-panel" class="card" style="display:none; margin-bottom:12px;">
+        <h3>Giám sát Dữ liệu & Trôi dạt hằng ngày (OPS-06 / PLPT-73)</h3>
+        <div id="monitoring-meta" style="margin-bottom:8px;"></div>
+        <div id="monitoring-alerts" class="msg" style="margin-bottom:8px;"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Đặc trưng</th>
+              <th>Tỷ lệ thiếu (%)</th>
+              <th>Biến động vs Tham chiếu (pp)</th>
+              <th>Trạng thái (&ge; 10 pp)</th>
+            </tr>
+          </thead>
+          <tbody id="monitoring-body"></tbody>
+        </table>
       </div>
 
       <div class="card" id="queue-card">

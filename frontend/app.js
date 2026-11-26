@@ -7,6 +7,7 @@ const API_BASE =
 
 let currentView = "active";
 let pendingOverrideEnqId = "";
+let triageStartMs = performance.now();
 
 function stripVietnameseDiacritics(str) {
   return String(str || "")
@@ -20,9 +21,10 @@ function stripVietnameseDiacritics(str) {
 function getSession() {
   const role = sessionStorage.getItem("sn_role");
   const userId = sessionStorage.getItem("sn_user_id");
+  const token = sessionStorage.getItem("sn_token");
   const expired = sessionStorage.getItem("sn_expired") === "true";
-  if (!role || expired) return null;
-  return { role, userId: userId || "sales_01" };
+  if (!role || !token || expired) return null;
+  return { role, userId: userId || "sales_01", token };
 }
 
 function showLogin(errMsg = "") {
@@ -48,6 +50,7 @@ function showWorkspace() {
   document.getElementById("workspace-screen").style.display = "block";
   document.getElementById("current-role").textContent = sess.role;
   loadQueue();
+  loadPilotTelemetry();
 }
 
 function showMessage(type, text) {
@@ -64,8 +67,7 @@ async function apiFetch(path, options = {}) {
   }
   const headers = {
     "Content-Type": "application/json",
-    "X-User-Role": sess.role,
-    "X-User-Id": sess.userId,
+    Authorization: `Bearer ${sess.token}`,
     ...(options.headers || {}),
   };
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -242,6 +244,17 @@ function buildQueueRow(row) {
 }
 
 async function loadQueue() {
+  triageStartMs = performance.now();
+  const queueCard = document.getElementById("queue-card");
+  const monPanel = document.getElementById("monitoring-panel");
+  if (currentView === "monitoring") {
+    await loadMonitoringDrift();
+    return;
+  }
+  if (queueCard && monPanel) {
+    queueCard.style.display = "block";
+    monPanel.style.display = "none";
+  }
   const qVal = document.getElementById("search-query").value.trim();
   const incOverflow = document.getElementById("overflow-toggle").value === "true";
   const params = new URLSearchParams({
@@ -384,15 +397,31 @@ async function submitBlock() {
 }
 
 function initWorkspaceEvents() {
-  document.getElementById("btn-login").addEventListener("click", () => {
-    sessionStorage.setItem("sn_role", document.getElementById("login-role").value);
-    sessionStorage.setItem("sn_user_id", document.getElementById("login-userid").value.trim() || "sales_01");
+  document.getElementById("btn-login").addEventListener("click", async () => {
+    const role = document.getElementById("login-role").value;
+    const userId = document.getElementById("login-userid").value.trim() || "sales_01";
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, role }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showLogin(data.detail || "Đăng nhập thất bại.");
+      return;
+    }
+    sessionStorage.setItem("sn_role", data.role);
+    sessionStorage.setItem("sn_user_id", data.user_id);
+    sessionStorage.setItem("sn_token", data.token);
     sessionStorage.removeItem("sn_expired");
     showWorkspace();
   });
 
-  document.getElementById("btn-logout").addEventListener("click", () => {
-    sessionStorage.removeItem("sn_role");
+  document.getElementById("btn-logout").addEventListener("click", async () => {
+    try {
+      await apiFetch("/auth/logout", { method: "POST" });
+    } catch (_) {}
+    sessionStorage.clear();
     showLogin("Đã đăng xuất.");
   });
 
@@ -442,3 +471,86 @@ function initWorkspaceEvents() {
 initWorkspaceEvents();
 showWorkspace();
 
+
+
+async function loadPilotTelemetry() {
+  const el = document.getElementById("pilot-telemetry-summary");
+  if (!el) return;
+  try {
+    const res = await apiFetch("/pilot/telemetry");
+    if (!res.ok) return;
+    const data = await res.json();
+    const red = data.effort_reduction_pct !== null ? `${data.effort_reduction_pct}%` : "N/A";
+    const targetBadge = data.effort_target_20pct_met ? "ĐẠT (>= 20%)" : "Chưa đạt (< 20%)";
+    el.textContent = `Ngày làm việc: ${data.observed_business_days}/20 | Giảm công sức: ${red} (${targetBadge}) | Exposure logs: ${data.exposure_logs_count || 0}`;
+  } catch (_) {}
+}
+
+async function recordPilotTriageEffort(enquiryId, accountKey, overrideCount, modelRank) {
+  const elapsedSec = Math.max(1, Math.round((performance.now() - triageStartMs) / 1000));
+  triageStartMs = performance.now();
+  try {
+    await apiFetch("/pilot/effort", {
+      method: "POST",
+      body: JSON.stringify({
+        enquiry_id: enquiryId,
+        account_key: accountKey || "",
+        enquiries_reviewed: 1,
+        queue_prep_minutes: 0.5,
+        triage_duration_seconds: elapsedSec,
+        override_count: overrideCount,
+        model_rank: modelRank,
+      }),
+    });
+    loadPilotTelemetry();
+  } catch (_) {}
+}
+
+async function loadMonitoringDrift() {
+  const queueCard = document.getElementById("queue-card");
+  const monPanel = document.getElementById("monitoring-panel");
+  if (!monPanel || !queueCard) return;
+  queueCard.style.display = "none";
+  monPanel.style.display = "block";
+
+  const metaEl = document.getElementById("monitoring-meta");
+  const alertsEl = document.getElementById("monitoring-alerts");
+  const tbody = document.getElementById("monitoring-body");
+  tbody.innerHTML = "";
+
+  const res = await apiFetch("/api/v1/monitoring/drift");
+  const data = await res.json();
+  if (!res.ok) {
+    alertsEl.className = "msg err";
+    alertsEl.textContent = data.detail || "Không có quyền xem Monitoring.";
+    return;
+  }
+
+  const mature = data.mature_60d_status || {};
+  metaEl.innerHTML = `
+    <strong>Độ bao phủ chấm điểm:</strong> ${data.score_coverage_pct}% (Ngưỡng &ge; 90%) |
+    <strong>Chờ nhãn 60 ngày:</strong> ${mature.immature_excluded_count || 0} hồ sơ chưa chín |
+    <strong>auto_retrain_enabled:</strong> <code>${String(data.auto_retrain_enabled)}</code>
+  `;
+  if (data.alerts && data.alerts.length > 0) {
+    alertsEl.className = "msg err";
+    alertsEl.textContent = data.alerts.map((a) => a.detail).join(" | ");
+  } else {
+    alertsEl.className = "msg ok";
+    alertsEl.textContent = "Không có cảnh báo trôi dạt dữ liệu.";
+  }
+
+  const missingMap = data.missingness_pct || {};
+  const deltaMap = data.missingness_delta_pp || {};
+  Object.keys(missingMap).forEach((col) => {
+    const tr = document.createElement("tr");
+    const delta = deltaMap[col] !== undefined ? deltaMap[col] : 0;
+    const isSpike = delta >= 10.0;
+    if (isSpike) {
+      tr.style.backgroundColor = "#ffe5e5";
+      tr.style.color = "#a10000";
+    }
+    tr.innerHTML = `<td>${col}</td><td>${missingMap[col]}%</td><td>${delta >= 0 ? "+" : ""}${delta} pp</td><td>${isSpike ? "CẢNH BÁO (>= 10 pp)" : "Bình thường"}</td>`;
+    tbody.appendChild(tr);
+  });
+}

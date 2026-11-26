@@ -24,7 +24,11 @@ from src.services.queue_service import (
     record_workspace_override,
     record_workspace_review,
 )
+import json
+import pandas as pd
 from src.models.serving_router import resolve_serving_route
+from src.monitoring.drift_monitor import assess_mature_ranking_drift, compute_daily_monitoring_snapshot, persist_daily_drift_snapshot
+from src.pilot.pilot_tracker import assign_or_get_pilot_treatment, log_pilot_effort_session, record_exposure_log, summarize_pilot_20bd
 from src.models.shadow_runner import ensure_batch_run_table, ensure_shadow_score_table
 from src.security.auth import (
     DEFAULT_SESSION_STORE,
@@ -769,3 +773,137 @@ def post_admin_accounts(
         detail=f"target={res['user_id']} role={res['role']} status={res['status']}",
     )
     return res
+
+
+# ============================================================================
+# PLPT-68: Pilot Effort & Telemetry Endpoints (20 Business Days)
+# ============================================================================
+
+@app.post("/pilot/effort")
+def post_pilot_effort(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-68: Ghi nhận công sức phân loại, triage_duration_seconds, phân bổ pilot_assignments và exposure_logs."""
+    db_path = get_db_path()
+    staff_id = str(payload.get("staff_id") or (auth.user_id if auth else "sales_staff")).strip()
+    business_date = str(payload.get("business_date") or datetime.now(VN_TZ).date().isoformat()).strip()
+    account_key = str(payload.get("account_key") or "").strip()
+    project_ref_code = str(payload.get("project_ref_code") or "").strip()
+    treatment_arm = str(payload.get("treatment_arm") or "").strip().upper()
+
+    if (account_key or project_ref_code) and not treatment_arm:
+        assign_res = assign_or_get_pilot_treatment(
+            db_path,
+            account_key=account_key or None,
+            project_ref_code=project_ref_code or None,
+        )
+        treatment_arm = assign_res["treatment_arm"]
+    elif not treatment_arm:
+        treatment_arm = "RULES_CONTROL"
+
+    try:
+        res = log_pilot_effort_session(
+            db_path,
+            business_date=business_date,
+            staff_id=staff_id,
+            enquiries_reviewed=int(payload.get("enquiries_reviewed", 1)),
+            queue_prep_minutes=float(payload.get("queue_prep_minutes", 0.0)),
+            triage_minutes=float(payload["triage_minutes"]) if payload.get("triage_minutes") is not None else None,
+            triage_duration_seconds=float(payload["triage_duration_seconds"]) if payload.get("triage_duration_seconds") is not None else None,
+            due_total=int(payload.get("due_total", 0)),
+            due_on_time=int(payload.get("due_on_time", 0)),
+            override_count=int(payload.get("override_count", 0)),
+            treatment_arm=treatment_arm,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    enquiry_id = str(payload.get("enquiry_id") or "").strip()
+    if enquiry_id:
+        exp = record_exposure_log(
+            db_path,
+            enquiry_id=enquiry_id,
+            account_key=account_key,
+            staff_id=staff_id,
+            treatment_arm=treatment_arm,
+            scoring_mode=str(payload.get("scoring_mode") or RULES_LABEL),
+            model_rank=payload.get("model_rank"),
+        )
+        res["exposure_log_id"] = exp["id"]
+
+    res["treatment_arm"] = treatment_arm
+    return res
+
+
+@app.get("/pilot/telemetry")
+def get_pilot_telemetry(
+    baseline_minutes_per_lead: float = Query(default=6.0, gt=0.0),
+    baseline_on_time_rate: float | None = Query(default=None),
+    _auth: AuthContext | None = Depends(
+        require_roles({"SALES_READER", "SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-68: Tổng hợp telemetry pilot 20 ngày làm việc, pilot_assignments và exposure_logs."""
+    return summarize_pilot_20bd(
+        get_db_path(),
+        baseline_minutes_per_lead=baseline_minutes_per_lead,
+        baseline_on_time_rate=baseline_on_time_rate,
+    )
+
+
+# ============================================================================
+# PLPT-72: Daily Drift, Missingness & Coverage Monitoring Endpoint (OPS-06)
+# ============================================================================
+
+@app.get("/api/v1/monitoring/drift")
+def get_monitoring_drift(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR", "SUPERVISOR", "DATA_STEWARD"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-72 / OPS-06: Giám sát biến động khối lượng, tỷ lệ thiếu (>= 10pp), bao phủ (< 90%) và khóa cứng auto_retrain_enabled = false."""
+    db_path = get_db_path()
+    ref_path = Path(__file__).resolve().parents[2] / "artifacts" / "reference" / "drift_reference_baseline.json"
+    ref_missing: dict[str, float] = {}
+    if ref_path.exists():
+        ref_data = json.loads(ref_path.read_text(encoding="utf-8"))
+        ref_missing = {str(k): float(v) for k, v in (ref_data.get("reference_missingness_pct") or {}).items()}
+
+    enq_df = pd.DataFrame()
+    out_df = pd.DataFrame()
+    if db_path.exists():
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            has_enq = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='clean_enquiries'").fetchone()
+            if has_enq:
+                enq_df = pd.read_sql_query("SELECT * FROM clean_enquiries", conn)
+            has_out = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcome_events'").fetchone()
+            if has_out:
+                out_df = pd.read_sql_query("SELECT * FROM outcome_events", conn)
+
+    snap = compute_daily_monitoring_snapshot(
+        enq_df,
+        reference_missingness_pct=ref_missing,
+    )
+    if db_path.exists():
+        snap["snapshot_id"] = persist_daily_drift_snapshot(str(db_path), snap)
+
+    mature_status = assess_mature_ranking_drift(enq_df, out_df) if not enq_df.empty else {
+        "mature_eligible_count": 0,
+        "immature_excluded_count": 0,
+        "known_mature_count": 0,
+        "unknown_mature_count": 0,
+        "mature_label_coverage_pct": 0.0,
+        "ranking_drift_assessable": False,
+        "reason": "EMPTY_COHORT",
+        "auto_retrain_allowed": False,
+    }
+
+    return {
+        **snap,
+        "mature_60d_status": mature_status,
+        "auto_retrain_enabled": False,
+        "auto_retrain_allowed": False,
+    }

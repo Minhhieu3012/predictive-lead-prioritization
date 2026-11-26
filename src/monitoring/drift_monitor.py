@@ -62,6 +62,7 @@ def compute_daily_monitoring_snapshot(
             "investigation_triggered": True,
             "recommended_fallback_to_rules": True,
             "auto_retrain_allowed": False,
+        "auto_retrain_enabled": False,
         }
 
     missingness_pct: dict[str, float] = {}
@@ -91,8 +92,9 @@ def compute_daily_monitoring_snapshot(
     if scored_column and scored_column in df.columns:
         unscored_mask = _is_missing_series(df[scored_column])
     elif "spec_completeness" in df.columns:
-        # Theo quy ước Workspace: thiếu/Minimal thông số bị coi là unscored hoặc thiếu dữ liệu đầu vào
-        unscored_mask = _is_missing_series(df["spec_completeness"])
+        # Theo quy ước Workspace & Quyết định PO #4: thiếu hoặc 'Minimal' (không phân biệt hoa thường) bị coi là unscored
+        spec_norm = df["spec_completeness"].fillna("").astype(str).str.strip().str.lower()
+        unscored_mask = _is_missing_series(df["spec_completeness"]) | (spec_norm == "minimal")
     else:
         unscored_mask = pd.Series([False] * total_rows, index=df.index)
 
@@ -129,6 +131,7 @@ def compute_daily_monitoring_snapshot(
         "investigation_triggered": investigation_triggered,
         "recommended_fallback_to_rules": investigation_triggered,
         "auto_retrain_allowed": False,
+        "auto_retrain_enabled": False,
     }
 
 
@@ -157,9 +160,14 @@ def assess_mature_ranking_drift(
             "ranking_drift_assessable": False,
             "reason": "EMPTY_COHORT",
             "auto_retrain_allowed": False,
+        "auto_retrain_enabled": False,
         }
 
-    merged = enquiries_df.merge(outcomes_df, on="enquiry_id", how="left", suffixes=("", "_out"))
+    if outcomes_df is None or outcomes_df.empty or "enquiry_id" not in outcomes_df.columns:
+        merged = enquiries_df.copy()
+        merged["label"] = "Unknown"
+    else:
+        merged = enquiries_df.merge(outcomes_df, on="enquiry_id", how="left", suffixes=("", "_out"))
     t0_parsed = pd.to_datetime(merged["t0_time"], errors="coerce", utc=True)
     now_utc = pd.Timestamp(now_dt).tz_convert("UTC")
     elapsed_days = (now_utc - t0_parsed).dt.total_seconds() / 86400.0
@@ -187,6 +195,7 @@ def assess_mature_ranking_drift(
         "ranking_drift_assessable": assessable,
         "reason": None if assessable else "INSUFFICIENT_MATURE_LABELS_OR_COVERAGE",
         "auto_retrain_allowed": False,
+        "auto_retrain_enabled": False,
     }
 
 

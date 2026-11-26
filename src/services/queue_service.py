@@ -74,6 +74,38 @@ def strip_vietnamese_diacritics(text: str) -> str:
     return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn").lower()
 
 
+
+_SNAPSHOT_RANK_CACHE: dict[tuple[str, int, int, str, int], list[dict[str, Any]]] = {}
+
+
+def _connect_sqlite(db_path: str | Path) -> sqlite3.Connection:
+    """PLPT-67: Kết nối SQLite bật WAL mode & synchronous=NORMAL để tối ưu đọc/ghi đồng thời."""
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except sqlite3.Error:
+        pass
+    return conn
+
+
+def ensure_performance_indexes(conn: sqlite3.Connection) -> None:
+    """PLPT-67: Tạo index cho các bảng truy vấn chính của Workspace."""
+    index_stmts = [
+        "CREATE INDEX IF NOT EXISTS idx_clean_enquiries_id ON clean_enquiries(enquiry_id)",
+        "CREATE INDEX IF NOT EXISTS idx_clean_enquiries_acct ON clean_enquiries(account_key)",
+        "CREATE INDEX IF NOT EXISTS idx_clean_enquiries_state ON clean_enquiries(workflow_state)",
+        "CREATE INDEX IF NOT EXISTS idx_blocked_accounts_enq ON blocked_accounts(enquiry_id)",
+        "CREATE INDEX IF NOT EXISTS idx_blocked_accounts_acct ON blocked_accounts(account_key)",
+        "CREATE INDEX IF NOT EXISTS idx_staff_review_logs_enq ON staff_review_logs(enquiry_id)",
+        "CREATE INDEX IF NOT EXISTS idx_staff_override_logs_enq ON staff_override_logs(enquiry_id)",
+    ]
+    for stmt in index_stmts:
+        try:
+            conn.execute(stmt)
+        except sqlite3.Error:
+            pass
+
 def ensure_operational_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -124,6 +156,7 @@ def ensure_operational_tables(conn: sqlite3.Connection) -> None:
         """
     )
 
+    ensure_performance_indexes(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS daily_queue_allocations (
@@ -203,7 +236,7 @@ def load_enquiries_and_meta(now: datetime | None = None) -> tuple[
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
+    with contextlib.closing(_connect_sqlite(db_path)) as conn:
         with conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -529,7 +562,7 @@ def _get_or_create_daily_snapshot(
         if not (bool(e.get("tier0_bypass")) or bool(e.get("is_overdue_2bd")))
     ]
 
-    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
+    with contextlib.closing(_connect_sqlite(db_path)) as conn:
         with conn:
             conn.row_factory = sqlite3.Row
             ensure_operational_tables(conn)
@@ -762,7 +795,24 @@ def build_workspace_queue_payload(
         if enq_id:
             enq_by_id[enq_id] = row
 
-    ranked = build_queue(unblocked_enquiries, now=now_vn, exclude_closed=True)
+    db_file = get_db_path()
+    db_stat = db_file.stat() if db_file.exists() else None
+    cache_key = (
+        str(db_file),
+        int(db_stat.st_mtime_ns) if db_stat else 0,
+        len(unblocked_enquiries),
+        cohort_id,
+        k,
+    )
+    is_scoped_pre = (auth_role in {"SALES_READER", "SUPERVISOR"}) and bool(auth_team_id or auth_assigned_accounts)
+    if not is_scoped_pre and cache_key in _SNAPSHOT_RANK_CACHE:
+        ranked = [dict(x) for x in _SNAPSHOT_RANK_CACHE[cache_key]]
+    else:
+        ranked = build_queue(unblocked_enquiries, now=now_vn, exclude_closed=True)
+        if not is_scoped_pre:
+            if len(_SNAPSHOT_RANK_CACHE) > 32:
+                _SNAPSHOT_RANK_CACHE.clear()
+            _SNAPSHOT_RANK_CACHE[cache_key] = [dict(x) for x in ranked]
 
     # Tính overdue 2 ngày làm việc trên toàn tập active hợp lệ
     overdue_2bd_count = 0
@@ -1042,7 +1092,7 @@ def record_workspace_review(payload: dict[str, Any], user_id: str) -> dict[str, 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
 
     db_path = get_db_path()
-    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
+    with contextlib.closing(_connect_sqlite(db_path)) as conn:
         with conn:
             ensure_operational_tables(conn)
             conn.execute(
@@ -1095,7 +1145,7 @@ def record_workspace_override(payload: dict[str, Any], user_id: str) -> dict[str
 
     now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
     db_path = get_db_path()
-    with contextlib.closing(sqlite3.connect(str(db_path), timeout=30.0)) as conn:
+    with contextlib.closing(_connect_sqlite(db_path)) as conn:
         with conn:
             ensure_operational_tables(conn)
             conn.execute(

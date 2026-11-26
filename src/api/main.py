@@ -79,6 +79,51 @@ def _get_db_path():
     return get_db_path()
 
 
+
+
+def _assert_scope_for_action(
+    *,
+    enquiry_id: str = "",
+    account_key: str = "",
+    auth: AuthContext | None,
+) -> None:
+    """Quyết định PO #2 (SEC 01): Chặn IDOR khi SALES_READER/SUPERVISOR thao tác ngoài team_id/assigned_accounts."""
+    if auth is None or auth.role not in {"SALES_READER", "SUPERVISOR"}:
+        return
+    if not auth.assigned_accounts and not auth.team_id:
+        return
+
+    target_acct = str(account_key or "").strip()
+    target_team = ""
+    enq = str(enquiry_id or "").strip()
+    db_path = get_db_path()
+    if enq and db_path.exists():
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(clean_enquiries)").fetchall()}
+            sel_cols = ["account_key"] + (["team_id"] if "team_id" in cols else [])
+            row = conn.execute(
+                f"SELECT {', '.join(sel_cols)} FROM clean_enquiries WHERE enquiry_id = ? LIMIT 1",
+                (enq,),
+            ).fetchone()
+            if row is not None:
+                if not target_acct:
+                    target_acct = str(row[0] or "").strip()
+                if len(row) > 1:
+                    target_team = str(row[1] or "").strip()
+
+    if auth.assigned_accounts:
+        allowed_accts = {a.strip().upper() for a in auth.assigned_accounts if a.strip()}
+        if not target_acct or target_acct.upper() not in allowed_accts:
+            raise HTTPException(
+                status_code=403,
+                detail="Không có quyền thao tác trên hồ sơ thuộc account ngoài phạm vi được gán.",
+            )
+    if auth.team_id and target_team and target_team.upper() != auth.team_id.strip().upper():
+        raise HTTPException(
+            status_code=403,
+            detail="Không có quyền thao tác trên hồ sơ thuộc team ngoài phạm vi được gán.",
+        )
+
 def _count_quarantine_rows() -> int:
     return count_quarantine_rows()
 
@@ -166,10 +211,7 @@ def block_lead_or_account(
         or (_auth.user_id if _auth is not None else "PO_OPERATOR")
     ).strip()
 
-    if _auth is not None and _auth.role == "SUPERVISOR" and _auth.assigned_accounts:
-        allowed_accts = {a.upper() for a in _auth.assigned_accounts}
-        if account_key and account_key.upper() not in allowed_accts:
-            raise HTTPException(status_code=403, detail="Tài khoản ngoài phạm vi account/team được gán.")
+    _assert_scope_for_action(enquiry_id=enquiry_id, account_key=account_key, auth=_auth)
 
     if not enquiry_id and not account_key:
         raise HTTPException(
@@ -380,6 +422,11 @@ def post_workspace_review(
 ) -> dict[str, Any]:
     """PLPT-25: Ghi nhận ACCEPT_PRIORITY và xác minh quyền liên hệ khách hàng."""
     try:
+        _assert_scope_for_action(
+            enquiry_id=str(payload.get("enquiry_id") or ""),
+            account_key=str(payload.get("account_key") or ""),
+            auth=auth,
+        )
         user_id = auth.user_id if auth is not None else "PO_OPERATOR"
         return record_workspace_review(payload, user_id=user_id)
     except WorkspaceActionError as error:
@@ -399,6 +446,11 @@ def post_workspace_override(
 ) -> dict[str, Any]:
     """PLPT-25 / CF-29: Ghi nhận OVERRIDE_PRIORITY vào staff_override_logs, cô lập hoàn toàn khỏi outcome_events."""
     try:
+        _assert_scope_for_action(
+            enquiry_id=str(payload.get("enquiry_id") or ""),
+            account_key=str(payload.get("account_key") or ""),
+            auth=auth,
+        )
         user_id = auth.user_id if auth is not None else "PO_OPERATOR"
         return record_workspace_override(payload, user_id=user_id)
     except WorkspaceActionError as error:

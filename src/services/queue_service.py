@@ -793,7 +793,8 @@ def build_workspace_queue_payload(
         else:
             active_candidates.append(entry)
 
-    if is_stale:
+    is_scoped_user = (auth_role in {"SALES_READER", "SUPERVISOR"}) and bool(auth_team_id or auth_assigned_accounts)
+    if is_stale or is_scoped_user:
         alloc = allocate_daily_k_slots_with_carry(
             active_candidates,
             capacity_k=k,

@@ -12,6 +12,18 @@ import tempfile
 import time
 
 from fastapi.testclient import TestClient
+
+def _cf_auth_headers(client: TestClient, role: str, user_id: str | None = None, *, expired: bool = False) -> dict[str, str]:
+    from src.security.auth import DEFAULT_SESSION_STORE
+    DEFAULT_SESSION_STORE._sessions.clear()
+    uid = user_id or f"cf_{role.lower()}"
+    res = client.post("/auth/login", json={"user_id": uid, "role": role})
+    assert res.status_code == 200, res.text
+    hdrs = {"Authorization": f"Bearer {res.json()['token']}"}
+    if expired:
+        hdrs["X-Session-Expired"] = "true"
+    return hdrs
+
 import numpy as np
 import pandas as pd
 
@@ -296,8 +308,8 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["QUARANTINE_DIR"] = str(tmp)
         os.environ["DAILY_CAPACITY_K"] = "5"
         c = TestClient(app)
-        act = c.get("/api/v1/workspace/queue?view=active", headers={"X-User-Role": "SALES_READER"}).json()
-        unsc = c.get("/api/v1/workspace/queue?view=unscored", headers={"X-User-Role": "SALES_READER"}).json()
+        act = c.get("/api/v1/workspace/queue?view=active", headers=_cf_auth_headers(c, "SALES_READER")).json()
+        unsc = c.get("/api/v1/workspace/queue?view=unscored", headers=_cf_auth_headers(c, "SALES_READER")).json()
         act_ids = {x["enquiry_id"] for x in act["items"]}
         unsc_ids = {x["enquiry_id"] for x in unsc["items"]}
         assert len(act_ids & unsc_ids) == 0
@@ -346,7 +358,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         _create_clean_db(db_path, [_make_row(t0_time=old_t0)])
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
-        res = TestClient(app).get("/api/v1/workspace/queue", headers={"X-User-Role": "SUPERVISOR"})
+        res = (lambda _c: _c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(_c, "SUPERVISOR")))(TestClient(app))
         assert res.status_code == 200 and res.json()["items"][0]["is_overdue_2bd"] is True
     elif fid == "CF-28":
         # Gọi API /api/v1/workspace/queue?view=active&include_overflow=true xác nhận đủ 30 hồ sơ không bị ẩn
@@ -355,7 +367,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
         os.environ["DAILY_CAPACITY_K"] = "25"
-        res = TestClient(app).get("/api/v1/workspace/queue?view=active&include_overflow=true&limit=100", headers={"X-User-Role": "SALES_READER"}).json()
+        res = (lambda _c: _c.get("/api/v1/workspace/queue?view=active&include_overflow=true&limit=100", headers=_cf_auth_headers(_c, "SALES_READER")))(TestClient(app)).json()
         assert res["total"] == 30 and len(res["items"]) == 30
         overflow_items = [x for x in res["items"] if x["allocation_type"] == "OVERFLOW_OUTSIDE_K"]
         assert len(overflow_items) == 5
@@ -368,8 +380,8 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
-        assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": ""}, headers={"X-User-Role": "SALES_READER"}).status_code == 400
-        assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": "Ly do hop le"}, headers={"X-User-Role": "SALES_READER"}).status_code == 200
+        assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": ""}, headers=_cf_auth_headers(c, "SALES_READER")).status_code == 400
+        assert c.post("/api/v1/workspace/override", json={"enquiry_id": "CF-ENQ-001", "override_reason_code": "OTHER_VERIFIED", "justification": "Ly do hop le"}, headers=_cf_auth_headers(c, "SALES_READER")).status_code == 200
         with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
             with conn:
                 assert conn.execute("SELECT COUNT(*) FROM raw_outcomes").fetchone()[0] == 0
@@ -379,7 +391,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         _create_clean_db(db_path, [_make_row()])
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
-        r = TestClient(app).post("/api/v1/workspace/review", json={"enquiry_id": "CF-ENQ-001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True, "contact_attempted": False}, headers={"X-User-Role": "SALES_READER"})
+        r = (lambda _c: _c.post("/api/v1/workspace/review", json={"enquiry_id": "CF-ENQ-001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": True, "contact_attempted": False}, headers=_cf_auth_headers(_c, "SALES_READER")))(TestClient(app))
         assert r.status_code == 200
     elif fid == "CF-31":
         db_path = tmp / "cf31.db"
@@ -387,14 +399,14 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
-        assert c.post("/api/block", json={"enquiry_id": "CF-ENQ-001"}, headers={"X-User-Role": "SUPERVISOR"}).status_code == 200
-        assert c.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()["total"] == 0
+        assert c.post("/api/block", json={"enquiry_id": "CF-ENQ-001"}, headers=_cf_auth_headers(c, "SUPERVISOR")).status_code == 200
+        assert c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(c, "SALES_READER")).json()["total"] == 0
     elif fid == "CF-32":
         db_path = tmp / "cf32.db"
         _create_clean_db(db_path, [_make_row()])
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
-        r = TestClient(app).post("/api/v1/workspace/review", json={"enquiry_id": "CF-ENQ-001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": False, "contact_attempted": True}, headers={"X-User-Role": "SALES_READER"})
+        r = (lambda _c: _c.post("/api/v1/workspace/review", json={"enquiry_id": "CF-ENQ-001", "decision_type": "ACCEPT_PRIORITY", "contact_permission_verified": False, "contact_attempted": True}, headers=_cf_auth_headers(_c, "SALES_READER")))(TestClient(app))
         assert r.status_code == 400
     elif fid == "CF-33":
         db_path = tmp / "cf33.db"
@@ -402,7 +414,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         _create_clean_db(db_path, [_make_row(extraction_time=stale_ext)])
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
-        r = TestClient(app).get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
+        r = (lambda _c: _c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(_c, "SALES_READER")))(TestClient(app)).json()
         assert r["status"] == STALE_STATUS and r["locked"] is True
     elif fid == "CF-34":
         df = pd.DataFrame([_make_row(contact_name="Nguyen Van A", phone="0909123456", email="a@b.com")])
@@ -417,8 +429,8 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
         assert c.get("/api/v1/workspace/queue").status_code == 401
-        assert c.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER", "X-Session-Expired": "true"}).status_code == 401
-        assert c.post("/api/block", json={"enquiry_id": "CF-ENQ-001"}, headers={"X-User-Role": "SALES_READER"}).status_code == 403
+        assert c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(c, "SALES_READER", expired=True)).status_code == 401
+        assert c.post("/api/block", json={"enquiry_id": "CF-ENQ-001"}, headers=_cf_auth_headers(c, "SALES_READER")).status_code == 403
     elif fid == "CF-36":
         # Kịch bản khôi phục backup và tái áp dụng lệnh chặn (blocked_accounts vẫn có hiệu lực sau restore)
         db_path = tmp / "cf36.db"
@@ -429,7 +441,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
         c = TestClient(app)
-        assert c.post("/api/block", json={"enquiry_id": "RESTORE-1", "reason": "Khach khiếu nại"}, headers={"X-User-Role": "SUPERVISOR"}).status_code == 200
+        assert c.post("/api/block", json={"enquiry_id": "RESTORE-1", "reason": "Khach khiếu nại"}, headers=_cf_auth_headers(c, "SUPERVISOR")).status_code == 200
         with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
             with conn:
                 block_registry = conn.execute("SELECT enquiry_id, account_key, reason, blocked_at, created_by FROM blocked_accounts").fetchall()
@@ -444,7 +456,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
                     block_registry,
                 )
                 conn.commit()
-        q_after = c.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"}).json()
+        q_after = c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(c, "SALES_READER")).json()
         assert q_after["total"] == 0
     elif fid == "CF-37":
         # Bản địa hóa UTF-8 tiếng Việt không mất dấu
@@ -463,7 +475,8 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
         ])
         os.environ["DATABASE_PATH"] = str(db_path)
         os.environ["QUARANTINE_DIR"] = str(tmp)
-        res = TestClient(app).get("/api/v1/workspace/queue?q=dong%20co", headers={"X-User-Role": "SALES_READER"}).json()
+        c = TestClient(app)
+        res = c.get("/api/v1/workspace/queue?q=dong%20co", headers=_cf_auth_headers(c, "SALES_READER")).json()
         assert len(res["items"]) == 1 and res["items"][0]["enquiry_id"] == "M1"
     elif fid == "CF-39":
         # Lịch nghỉ lễ VN (30/4 - 1/5) + T7/CN không tính vào ngày làm việc
@@ -482,7 +495,7 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
 
         def _hit(_):
             t_start = time.perf_counter()
-            r = c.get("/api/v1/workspace/queue", headers={"X-User-Role": "SALES_READER"})
+            r = c.get("/api/v1/workspace/queue", headers=_cf_auth_headers(c, "SALES_READER"))
             assert r.status_code == 200
             return time.perf_counter() - t_start
 

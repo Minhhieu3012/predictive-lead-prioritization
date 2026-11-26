@@ -140,3 +140,122 @@ def persist_shadow_scores(db_path: str | Path, shadow_df: pd.DataFrame) -> int:
 
 # Alias hỗ trợ tên hàm rõ nghĩa shadow scoring
 score_shadow_batch = run_shadow_batch
+
+
+
+BATCH_SLA_SECONDS = 900.0  # OPS-02: <= 15 phút cho tối đa 5.000 bản ghi
+
+
+def ensure_batch_run_table(conn: sqlite3.Connection) -> None:
+    """PLPT-64: Tạo bảng batch_run_logs theo dõi thời lượng và trạng thái lô chạy ngầm."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS batch_run_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_type TEXT NOT NULL DEFAULT 'SHADOW_SCORING',
+            status TEXT NOT NULL,
+            total_records INTEGER NOT NULL,
+            processed_records INTEGER NOT NULL,
+            failed_records INTEGER NOT NULL DEFAULT 0,
+            duration_seconds REAL NOT NULL,
+            sla_limit_seconds REAL NOT NULL DEFAULT 900.0,
+            sla_met INTEGER NOT NULL,
+            model_version TEXT NOT NULL,
+            error_detail TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def run_shadow_batch_with_audit(
+    db_path: str | Path,
+    manifest_path: str | Path,
+    model: RegularizedLogisticRegressionModel,
+    preprocessor: TabularPreprocessor,
+    *,
+    requested_tables: list[str] | None = None,
+    simulate_partial_failure: bool = False,
+) -> dict[str, Any]:
+    """
+    PLPT-64 / OPS-02: Chạy chấm điểm ngầm kèm ghi batch_run_logs (SLA <= 15p/5.000 dòng).
+    Chặn tuyệt đối FAILED_PARTIAL: nếu có lỗi một phần, ghi log FAILED_PARTIAL và KHÔNG lưu điểm dở dang.
+    """
+    import time
+    t_start = time.perf_counter()
+    started_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    m_path = Path(manifest_path)
+    manifest = json.loads(m_path.read_text(encoding="utf-8")) if m_path.exists() else {}
+    model_version = str(manifest.get("model_version", "unknown"))
+
+    try:
+        shadow_df = run_shadow_batch(
+            db_path,
+            manifest_path,
+            model,
+            preprocessor,
+            requested_tables=requested_tables,
+            persist_logs=False,
+        )
+        total_records = int(len(shadow_df))
+        if simulate_partial_failure and total_records > 0:
+            raise RuntimeError("FAILED_PARTIAL: Lỗi một phần lô chấm điểm ngầm, hủy ghi nhận để bảo toàn hàng đợi.")
+        if total_records > 0:
+            persist_shadow_scores(db_path, shadow_df)
+        duration = round(time.perf_counter() - t_start, 4)
+        sla_met = duration <= BATCH_SLA_SECONDS
+        status = "SUCCESS"
+        err_detail = None
+        processed = total_records
+        failed = 0
+    except Exception as exc:
+        duration = round(time.perf_counter() - t_start, 4)
+        sla_met = duration <= BATCH_SLA_SECONDS
+        status = "FAILED_PARTIAL" if "FAILED_PARTIAL" in str(exc) else "FAILED"
+        err_detail = str(exc)
+        total_records = 0
+        processed = 0
+        failed = 1
+        shadow_df = pd.DataFrame()
+
+    finished_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_batch_run_table(conn)
+            conn.execute(
+                """
+                INSERT INTO batch_run_logs (
+                    batch_type, status, total_records, processed_records, failed_records,
+                    duration_seconds, sla_limit_seconds, sla_met, model_version,
+                    error_detail, started_at, finished_at
+                ) VALUES ('SHADOW_SCORING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    status,
+                    total_records,
+                    processed,
+                    failed,
+                    duration,
+                    BATCH_SLA_SECONDS,
+                    1 if sla_met else 0,
+                    model_version,
+                    err_detail,
+                    started_iso,
+                    finished_iso,
+                ),
+            )
+            conn.commit()
+
+    return {
+        "status": status,
+        "total_records": total_records,
+        "processed_records": processed,
+        "failed_records": failed,
+        "duration_seconds": duration,
+        "sla_limit_seconds": BATCH_SLA_SECONDS,
+        "sla_met": sla_met,
+        "model_version": model_version,
+        "error_detail": err_detail,
+        "scores_persisted": status == "SUCCESS" and total_records > 0,
+    }

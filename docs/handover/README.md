@@ -14,3 +14,4 @@ Thư mục này lưu trữ bộ tài liệu bàn giao vận hành và thoát h�
    - Sao lưu SQLite xoay vòng 35 ngày (`RTO 4 giờ`, `RPO 24 giờ`) và khôi phục bắt buộc chạy lại lệnh chặn/xóa (`src/ops/backup_restore.py`).
 3. **Quy trình thoát hệ thống trung lập (`portable_exit_guide.md`):**
    - Hướng dẫn chạy `src/ops/portable_exit.py` để xuất dữ liệu được phép, schema DDL và manifest bàn giao sang định dạng trung lập UTF-8 CSV/JSON và kiểm đọc bằng công cụ độc lập (`OPS 08`).
+

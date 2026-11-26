@@ -209,3 +209,4 @@ def summarize_pilot_20bd(
         "due_date_non_inferior": due_non_inferior,
         "total_overrides": int(df["override_count"].sum()),
     }
+

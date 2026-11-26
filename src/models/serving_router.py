@@ -196,3 +196,4 @@ def route_queue_scoring(
         "route": decision.to_dict(),
         "items": ranked,
     }
+

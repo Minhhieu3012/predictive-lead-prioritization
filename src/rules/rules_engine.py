@@ -264,3 +264,4 @@ def build_queue(
 ) -> list[dict[str, Any]]:
     """Hàm đồng danh tương thích với main.py và bộ unit test."""
     return rank_queue(enquiries, now=now, exclude_closed=exclude_closed)
+

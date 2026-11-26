@@ -400,3 +400,97 @@ def train_candidate_models(
         "dtree": dtree,
         "feature_columns": feature_cols,
     }
+
+
+
+def ensure_model_registry_table(conn) -> None:
+    """PLPT-63: Tạo bảng model_registry lưu version, hash, seed và cấm tự động refit."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_registry (
+            model_version TEXT PRIMARY KEY,
+            candidate_type TEXT NOT NULL,
+            random_seed INTEGER NOT NULL,
+            training_cutoff_t0 TEXT NOT NULL,
+            training_row_count INTEGER NOT NULL,
+            sealed_test_count INTEGER NOT NULL DEFAULT 0,
+            feature_dictionary_hash TEXT NOT NULL,
+            preprocessor_hash TEXT NOT NULL,
+            data_origin TEXT NOT NULL,
+            approval_status TEXT NOT NULL DEFAULT 'PENDING_GATE_G1_REVIEW',
+            serving_mode_locked TEXT NOT NULL DEFAULT 'RULES_BASELINE',
+            auto_retrain_allowed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def register_model_in_registry(
+    db_path: str | Path,
+    manifest: dict[str, Any],
+    *,
+    sealed_test_count: int = 0,
+) -> dict[str, Any]:
+    """PLPT-63: Ghi nhận phiên bản mô hình vào model_registry (cấm tự động refit)."""
+    import contextlib, sqlite3
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_model_registry_table(conn)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO model_registry (
+                    model_version, candidate_type, random_seed, training_cutoff_t0,
+                    training_row_count, sealed_test_count, feature_dictionary_hash,
+                    preprocessor_hash, data_origin, approval_status, serving_mode_locked,
+                    auto_retrain_allowed, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    str(manifest["model_version"]),
+                    str(manifest["candidate_type"]),
+                    int(manifest["random_seed"]),
+                    str(manifest["training_cutoff_t0"]),
+                    int(manifest["training_row_count"]),
+                    int(sealed_test_count),
+                    str(manifest["feature_dictionary_hash"]),
+                    str(manifest["preprocessor_hash"]),
+                    str(manifest["data_origin"]),
+                    str(manifest.get("approval_status", "PENDING_GATE_G1_REVIEW")),
+                    str(manifest.get("serving_mode_locked", "RULES_BASELINE")),
+                    now_iso,
+                ),
+            )
+            conn.commit()
+    return {"model_version": manifest["model_version"], "auto_retrain_allowed": False, "registered_at": now_iso}
+
+
+def split_training_and_sealed_cohort(
+    enquiries_df: pd.DataFrame,
+    outcomes_df: pd.DataFrame,
+    *,
+    training_cutoff_t0: str,
+    train_target_count: int = 1000,
+    sealed_test_count: int = 200,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    PLPT-63: Tách chuẩn 1.000 hồ sơ TRAINING_CANDIDATE (<= cutoff) và 200 SEALED_LATER_TEST (> cutoff)
+    theo đúng trình tự thời gian t0_time, không chồng lấn.
+    """
+    cutoff_dt = _parse_iso(training_cutoff_t0)
+    if cutoff_dt is None:
+        raise ValueError(f"Invalid training_cutoff_t0: {training_cutoff_t0}")
+
+    train_mature = filter_mature_training_rows(enquiries_df, outcomes_df, training_cutoff_t0)
+    train_mature = train_mature.sort_values("t0_time").head(train_target_count).copy()
+    train_mature["cohort_split"] = "TRAINING_CANDIDATE"
+
+    merged = enquiries_df.merge(outcomes_df[["enquiry_id", "label"]], on="enquiry_id", how="inner")
+    merged["label_norm"] = merged["label"].astype(str).str.strip().str.upper()
+    merged = merged[merged["label_norm"].isin({"POSITIVE", "NEGATIVE"})].copy()
+    t0_series = pd.to_datetime(merged["t0_time"], errors="coerce", utc=True)
+    cutoff_utc = pd.Timestamp(cutoff_dt).tz_convert("UTC")
+    later = merged[t0_series > cutoff_utc].sort_values("t0_time").head(sealed_test_count).copy()
+    later["cohort_split"] = "SEALED_LATER_TEST"
+    return train_mature, later

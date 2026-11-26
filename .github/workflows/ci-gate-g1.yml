@@ -24,6 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Secret Scan (gitleaks - SEC 06 / PLPT-61)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Execute 40 Control Fixtures Suite (Gate G1)
         run: |
           python -m pytest tests/control_fixtures/test_gate_g1_controls.py -v --junitxml=artifacts/gate_g1/junit_cf40.xml
@@ -67,3 +72,4 @@ jobs:
             artifacts/gate_g1/junit_cf40.xml
             artifacts/gate_g1/gate_g1_benchmark_report.json
           if-no-files-found: warn
+

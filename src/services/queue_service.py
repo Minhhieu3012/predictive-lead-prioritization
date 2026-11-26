@@ -16,7 +16,10 @@ from src.config.vn_holidays import count_vn_business_days, is_vn_business_day
 from src.models.serving_router import (
     FALLBACK_SERVING_MODE as FALLBACK_MODE,
     get_active_scoring_mode,
+    resolve_serving_route,
 )
+from src.security.auth import filter_records_by_auth_scope
+from src.security.incident_hold import get_active_incident_hold
 from src.rules.rules_engine import (
     RULES_LABEL,
     _parse_date,
@@ -660,6 +663,9 @@ def build_workspace_queue_payload(
     include_overflow: bool = False,
     capacity_k: int | None = None,
     now: datetime | None = None,
+    auth_role: str | None = None,
+    auth_team_id: str | None = None,
+    auth_assigned_accounts: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     now_vn = now or datetime.now(VN_TZ)
     (
@@ -672,12 +678,22 @@ def build_workspace_queue_payload(
         steward_count,
     ) = load_enquiries_and_meta(now=now_vn)
     k = capacity_k if capacity_k is not None else get_daily_capacity_k()
-    scoring_mode = get_active_scoring_mode()
+    active_hold = get_active_incident_hold(get_db_path())
+    gate_g1_path = Path(__file__).resolve().parents[2] / "artifacts" / "gate_g1" / "gate_g1_benchmark_report.json"
+    manifest_path = Path(__file__).resolve().parents[2] / "artifacts" / "models" / "plpt-logreg-v1.0.0" / "manifest.json"
+    route_decision = resolve_serving_route(
+        gate_g1_report=gate_g1_path if gate_g1_path.exists() else None,
+        manifest=manifest_path if manifest_path.exists() else None,
+        incident_hold_active=active_hold is not None,
+    )
+    scoring_mode = route_decision.active_mode
     quarantine_count = count_quarantine_rows()
 
-    is_stale = source_age_hours is None or source_age_hours > STALE_HOLD_HOURS
+    is_stale = (active_hold is not None) or (source_age_hours is None) or (source_age_hours > STALE_HOLD_HOURS)
     status = STALE_STATUS if is_stale else "OK"
-    if source_age_hours is None:
+    if active_hold is not None:
+        warning = f"Hàng đợi đang bị khóa khẩn cấp (SEC 08 incident_id={active_hold['incident_id']}): {active_hold['reason']}"
+    elif source_age_hours is None:
         warning = (
             "Không xác minh được độ tươi dữ liệu nguồn (tập dữ liệu rỗng hoặc thiếu/sai định dạng extraction_time). "
             "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
@@ -725,6 +741,14 @@ def build_workspace_queue_payload(
             "limit": limit,
             "items": paged,
         }
+
+    # Quyết định PO #2 (SEC 01): Lọc theo team_id / assigned_accounts trước khi xếp hạng & trả explanation
+    enquiries = filter_records_by_auth_scope(
+        enquiries,
+        role=auth_role,
+        team_id=auth_team_id,
+        assigned_accounts=auth_assigned_accounts,
+    )
 
     # Lọc hồ sơ bị chặn khẩn cấp
     enq_by_id: dict[str, dict[str, Any]] = {}
@@ -1092,3 +1116,4 @@ def record_workspace_override(payload: dict[str, Any], user_id: str) -> dict[str
         "overridden_at": now_iso,
         "isolated_from_outcome_events": True,
     }
+

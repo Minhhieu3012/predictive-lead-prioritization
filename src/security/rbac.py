@@ -1,11 +1,16 @@
-"""PLPT-24 / PLPT-25 / SEC-01: 5-Role RBAC Policy Matrix & FastAPI Guards."""
+"""PLPT-24 / PLPT-25 / PLPT-59 / SEC-01: 5-Role RBAC Policy Matrix & FastAPI Guards."""
 
 import os
 from typing import Iterable
 
 from fastapi import Header, HTTPException
 
-from src.security.auth import VALID_ROLES, AuthContext, resolve_auth_context
+from src.security.auth import (
+    DEFAULT_SESSION_STORE,
+    VALID_ROLES,
+    AuthContext,
+    resolve_auth_context,
+)
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SALES_READER": {
@@ -58,7 +63,6 @@ def has_permission(role: str, permission: str) -> bool:
 
 def is_rbac_enforced_on_legacy() -> bool:
     """
-    Giữ cờ cấu hình để không làm gãy 35 unit test MVP cũ khi test cũ chưa truyền header auth.
     Mặc định True trên /api/queue và /api/block; có thể đặt RBAC_ENFORCE_LEGACY=false nếu cần tắt cho bộ test MVP cũ không truyền header auth.
     """
     return os.getenv("RBAC_ENFORCE_LEGACY", "true").strip().lower() in {"1", "true", "yes"}
@@ -69,7 +73,11 @@ def is_rbac_enforced_on_v1() -> bool:
     return os.getenv("RBAC_ENFORCE_V1", "true").strip().lower() in {"1", "true", "yes"}
 
 
-def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced_on_v1):
+def require_roles(
+    allowed_roles: Iterable[str],
+    enforce_flag_fn=is_rbac_enforced_on_v1,
+    session_store=DEFAULT_SESSION_STORE,
+):
     allowed_set = {r.upper() for r in allowed_roles}
 
     def _dependency(
@@ -79,10 +87,11 @@ def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced
         authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> AuthContext | None:
         enforce = enforce_flag_fn()
-        # Nếu là legacy endpoint và không bật cờ ép buộc, nhưng caller vẫn chủ động gửi header auth/expired thì vẫn kiểm tra
         has_any_header = any([x_user_role, x_session_expired, authorization])
         if not enforce and not has_any_header:
             return None
+
+        from src.services.queue_service import get_db_path
 
         ctx = resolve_auth_context(
             x_user_role=x_user_role,
@@ -90,6 +99,8 @@ def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced
             x_session_expired=x_session_expired,
             authorization=authorization,
             require_auth=True,
+            session_store=session_store,
+            db_path=get_db_path(),
         )
         if ctx is not None and ctx.role not in allowed_set:
             raise HTTPException(
@@ -103,6 +114,7 @@ def require_roles(allowed_roles: Iterable[str], enforce_flag_fn=is_rbac_enforced
 
 __all__ = [
     "AuthContext",
+    "DEFAULT_SESSION_STORE",
     "ROLE_PERMISSIONS",
     "VALID_ROLES",
     "has_permission",

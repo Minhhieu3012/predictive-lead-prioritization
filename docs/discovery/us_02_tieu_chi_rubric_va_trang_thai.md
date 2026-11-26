@@ -47,3 +47,4 @@ Các hồ sơ hợp lệ được chấm điểm minh bạch theo 4 tiêu chí s
 
 - **Xử lý thiếu dữ liệu (Missing Handling — MOD 06, Annex B):** Nếu thiếu `spec_completeness` (hoặc giá trị không hợp lệ) thì gán `+0đ` và hiển thị rõ thông tin còn thiếu để Sales kiểm tra; nếu không có `contract_due_date` (`NULL`) thì `sla_urgency` nhận `+0đ` (không xếp nhầm vào mức `> 7 ngày: +5đ`).
 - **Mã khóa dữ liệu cũ:** Hệ thống sử dụng duy nhất mã trạng thái chuẩn `HOLD_STALE_DATA` khi tuổi dữ liệu vượt quá 24 giờ hoặc không xác minh được `extraction_time`.
+

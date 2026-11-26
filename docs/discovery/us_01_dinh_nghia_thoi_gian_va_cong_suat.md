@@ -28,3 +28,4 @@
   3. **Suất khám phá ngẫu nhiên (10% suất tùy chọn):** Dành đúng **10%** số slot tùy chọn còn lại (sau khi trừ nhóm bắt buộc `TIER_0`) cho các hồ sơ đủ điều kiện nhưng có điểm xếp hạng thấp hơn để tránh bỏ sót khách hàng tiềm năng và giữ dữ liệu đánh giá khách quan.
   4. **Cảnh báo quá hạn (2 ngày làm việc):** Bất kỳ hồ sơ hợp lệ nào quá **2 ngày làm việc** kể từ `t0_time` chưa được xem xét sẽ tự động gắn cờ quá hạn báo lên cấp Quản lý (Supervisor) — tuyệt đối không tự động xóa hay ẩn hồ sơ.
 
+

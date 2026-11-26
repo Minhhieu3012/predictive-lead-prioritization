@@ -486,3 +486,4 @@ def build_pre_t0_store(
         "rejected_count": rejected_count,
         "feature_columns": len(feature_cols),
     }
+

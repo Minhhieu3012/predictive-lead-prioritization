@@ -124,3 +124,4 @@ def apply_versioned_label_correction(
         "recorded_at": recorded_at,
         "preserved_historical_score": prior_frozen_score,
     }
+

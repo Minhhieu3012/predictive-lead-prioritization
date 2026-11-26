@@ -136,3 +136,4 @@ def test_plpt55_env_separation_and_secret_management(monkeypatch):
 
     monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
     assert len(get_session_secret_key()) == 40
+

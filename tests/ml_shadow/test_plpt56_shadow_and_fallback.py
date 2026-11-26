@@ -179,3 +179,4 @@ def test_plpt56_shadow_runner_isolation_and_router_auto_fallback(tmp_path: Path)
     routed = route_queue_scoring([row], route_decision=default_route, shadow_scores_by_id={"SH-001": 0.77})
     assert routed["route"]["active_mode"] == DEFAULT_SERVING_MODE
     assert routed["items"][0]["shadow_score_logged"] == pytest.approx(0.77)
+

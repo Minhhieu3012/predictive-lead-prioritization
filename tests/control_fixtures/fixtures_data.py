@@ -54,3 +54,4 @@ def create_clean_db(db_path: Path, rows: list[dict[str, Any]]) -> None:
     with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
         with conn:
             df.to_sql("clean_enquiries", conn, index=False, if_exists="replace")
+

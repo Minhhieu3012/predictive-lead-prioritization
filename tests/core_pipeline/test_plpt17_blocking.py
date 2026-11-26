@@ -207,3 +207,4 @@ def test_missing_or_invalid_extraction_time_holds_stale_data(tmp_path, monkeypat
     assert data["total"] == 0
     assert data["items"] == []
     assert data["data"] == []
+

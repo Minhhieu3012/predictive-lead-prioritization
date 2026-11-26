@@ -206,3 +206,4 @@ def test_tier0_urgent_sla_overdue_negative_days():
     result = calculate_rules_score(enquiry, now=NOW)
     assert result["tier0_bypass"] is True
     assert result["priority_tier"] == "TIER_0"
+

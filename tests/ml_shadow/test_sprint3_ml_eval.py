@@ -393,3 +393,4 @@ def test_pre_t0_store_lineage_and_account_masking(tmp_path: Path):
             assert lin["E-LEAK"]["rejection_code"] == "FEATURE_EVENT_AFTER_T0"
             assert lin["E-OK-1"]["feature_status"] == "READY"
             assert lin["E-OK-1"]["rejection_code"] is None
+

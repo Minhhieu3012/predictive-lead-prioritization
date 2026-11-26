@@ -43,3 +43,4 @@ Khi phát hiện nghi ngờ rò rỉ dữ liệu cá nhân, truy cập trái ph�
 2. **Giờ 1 – 2 (Lưu dấu vết):** Lưu giữ toàn bộ nhật ký hệ thống (`audit_log`), bản ghi bị ảnh hưởng và chặn khẩn cấp tài khoản liên quan.
 3. **Giờ 2 – 4 (Báo cáo bắt buộc):** Gửi thông báo chính thức cho **Người phụ trách phía SongNhat (Purchaser)** **trong vòng tối đa 4 giờ** kể từ lúc phát hiện.
 4. **Sau 4 giờ (Khắc phục):** Vá lỗi, kiểm thử lại toàn bộ chốt an toàn trước khi mở lại hệ thống.
+

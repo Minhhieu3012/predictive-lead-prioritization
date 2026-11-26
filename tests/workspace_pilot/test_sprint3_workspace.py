@@ -444,3 +444,4 @@ def test_fractional_carry_across_consecutive_days_and_idempotency(tmp_path: Path
 
     assert explore_counts == [0, 1, 0, 1]
     assert carry_outs == [5, 0, 5, 0]
+

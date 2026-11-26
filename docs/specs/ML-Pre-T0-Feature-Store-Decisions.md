@@ -24,3 +24,4 @@
    - Khi thiếu `account_key`: `UNKNOWN`.
 4. **An toàn đóng kết nối SQLite trên Windows**:
    - Mọi thao tác đọc `clean_enquiries` và ghi `pre_t0_features` / `pre_t0_feature_lineage` trong `build_pre_t0_store` đều bọc bằng `with contextlib.closing(sqlite3.connect(...)) as conn:` kèm `with conn:` để tránh lỗi khóa file `WinError 32`.
+

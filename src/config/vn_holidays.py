@@ -77,3 +77,4 @@ def count_vn_business_days(
             days += 1
         cur += timedelta(days=1)
     return days
+

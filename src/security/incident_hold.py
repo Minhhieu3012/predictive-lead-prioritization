@@ -300,3 +300,4 @@ def commit_local_emergency_block(
                 "reason": existing[2] or reason,
                 "blocked_at": existing[3] or now_iso,
             }
+

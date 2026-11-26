@@ -80,3 +80,4 @@ def export_portable_exit_bundle(
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     manifest["manifest_file"] = str(manifest_path)
     return manifest
+

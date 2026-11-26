@@ -495,3 +495,4 @@ def _dispatch_fixture(fid: str, tmp: Path) -> None:
 def test_all_40_control_fixtures():
     for fid in ALL_CONTROL_FIXTURE_IDS:
         run_single_control_fixture(fid)
+

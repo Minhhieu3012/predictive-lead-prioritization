@@ -113,3 +113,4 @@ def test_sprint5_ops_backup_restore_replay_and_portable_exit(tmp_path: Path):
     assert "clean_enquiries" in exit_bundle["tables"]
     assert "blocked_accounts" in exit_bundle["tables"]
     assert exit_bundle["tables"]["clean_enquiries"]["row_count"] == 1
+

@@ -87,3 +87,4 @@ Ví dụ: `D = 5` mỗi ngày → `quota_tenths` lần lượt `5, 10, 5, 10...`
 ## 8. AC4 — Concurrency và latency
 
 - Kiểm thử trên 5 concurrent active sessions với tối thiểu 100 requests được xác thực (`test_workspace_all_5_roles_and_100_req_5_sessions_p95`), bảo đảm `p95 <= 3.0s`.
+

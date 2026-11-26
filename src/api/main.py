@@ -24,6 +24,27 @@ from src.services.queue_service import (
     record_workspace_override,
     record_workspace_review,
 )
+from src.models.serving_router import resolve_serving_route
+from src.models.shadow_runner import ensure_batch_run_table, ensure_shadow_score_table
+from src.security.auth import (
+    DEFAULT_SESSION_STORE,
+    ensure_auth_tables,
+    get_env_mode,
+    get_session_secret_key,
+    get_session_ttl_minutes,
+    is_legacy_role_header_allowed,
+    filter_records_by_auth_scope,
+    get_internal_account,
+    list_internal_accounts,
+    record_security_audit_log,
+    upsert_internal_account,
+)
+from src.security.incident_hold import (
+    activate_emergency_hold,
+    get_active_incident_hold,
+    record_purchaser_notification,
+    release_emergency_hold,
+)
 from src.security.rbac import (
     VALID_ROLES,
     AuthContext,
@@ -145,6 +166,11 @@ def block_lead_or_account(
         or (_auth.user_id if _auth is not None else "PO_OPERATOR")
     ).strip()
 
+    if _auth is not None and _auth.role == "SUPERVISOR" and _auth.assigned_accounts:
+        allowed_accts = {a.upper() for a in _auth.assigned_accounts}
+        if account_key and account_key.upper() not in allowed_accts:
+            raise HTTPException(status_code=403, detail="Tài khoản ngoài phạm vi account/team được gán.")
+
     if not enquiry_id and not account_key:
         raise HTTPException(
             status_code=400,
@@ -246,7 +272,13 @@ def get_queue(
             _steward_count,
         ) = load_enquiries_and_meta()
         now_vn = datetime.now(VN_TZ)
-        queue = build_queue(enquiries, now=now_vn, exclude_closed=True)
+        scoped_enquiries = filter_records_by_auth_scope(
+            enquiries,
+            role=_auth.role if _auth else None,
+            team_id=_auth.team_id if _auth else None,
+            assigned_accounts=_auth.assigned_accounts if _auth else (),
+        )
+        queue = build_queue(scoped_enquiries, now=now_vn, exclude_closed=True)
 
         active_queue = []
         for entry in queue:
@@ -258,9 +290,12 @@ def get_queue(
                 continue
             active_queue.append(entry)
 
-        is_stale = source_age_hours is None or source_age_hours > STALE_HOLD_HOURS
+        active_hold = get_active_incident_hold(get_db_path())
+        is_stale = (active_hold is not None) or (source_age_hours is None) or (source_age_hours > STALE_HOLD_HOURS)
         status = STALE_STATUS if is_stale else "OK"
-        if source_age_hours is None:
+        if active_hold is not None:
+            warning = f"Hàng đợi đang bị khóa khẩn cấp (SEC 08 incident_id={active_hold['incident_id']}): {active_hold['reason']}"
+        elif source_age_hours is None:
             warning = (
                 "Không xác minh được độ tươi dữ liệu nguồn (tập dữ liệu rỗng hoặc thiếu/sai định dạng extraction_time). "
                 "Hàng đợi tạm khóa (HOLD_STALE_DATA) để đảm bảo an toàn vận hành."
@@ -326,6 +361,9 @@ def get_workspace_queue(
             limit=limit,
             query_text=q,
             include_overflow=include_overflow,
+            auth_role=_auth.role if _auth else None,
+            auth_team_id=_auth.team_id if _auth else None,
+            auth_assigned_accounts=_auth.assigned_accounts if _auth else (),
         )
     except FileNotFoundError as error:
         raise HTTPException(status_code=503, detail=str(error))
@@ -369,3 +407,313 @@ def post_workspace_override(
         raise HTTPException(status_code=400, detail=str(error))
     except sqlite3.Error as error:
         raise HTTPException(status_code=500, detail=f"Database error: {error}")
+
+
+
+# ============================================================================
+# PLPT-60: Auth, Incident Hold (4h SLA) & Security Readiness Endpoints
+# ============================================================================
+
+@app.post("/auth/login")
+def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """PLPT-59 / PLPT-60 / Quyết định PO #1 & #2: Xác thực qua danh bạ nội bộ và cấp token HMAC-SHA256."""
+    import os as _os
+    db_path = get_db_path()
+    user_id = str(payload.get("user_id") or "").strip()
+    role = str(payload.get("role") or "").strip().upper()
+    team_id = str(payload.get("team_id") or "").strip() or None
+    assigned_accounts = [str(a).strip() for a in (payload.get("assigned_accounts") or []) if str(a).strip()]
+
+    acct = get_internal_account(db_path, user_id) if user_id else None
+    if acct is not None:
+        if acct["status"] != "ACTIVE":
+            raise HTTPException(status_code=403, detail="Tài khoản nội bộ đã bị thu hồi hoặc khóa.")
+        if role and role != acct["role"]:
+            raise HTTPException(status_code=403, detail="Vai trò yêu cầu không khớp danh bạ nội bộ.")
+        role = acct["role"]
+        team_id = acct["team_id"]
+        assigned_accounts = acct["assigned_accounts"]
+    elif _os.getenv("REQUIRE_ACCOUNT_DIRECTORY", "false").strip().lower() in {"1", "true", "yes"} or get_env_mode() == "production":
+        raise HTTPException(status_code=401, detail="Tài khoản chưa được ADMINISTRATOR cấp trong danh bạ nội bộ.")
+
+    ttl_raw = payload.get("ttl_minutes")
+    ttl_minutes = int(ttl_raw) if ttl_raw is not None else None
+
+    record, token = DEFAULT_SESSION_STORE.issue_signed_session(
+        user_id=user_id,
+        role=role,
+        ttl_minutes=ttl_minutes,
+        team_id=team_id,
+        assigned_accounts=assigned_accounts,
+    )
+    record_security_audit_log(
+        get_db_path(),
+        event_type="AUTH_LOGIN",
+        user_id=record.user_id,
+        role=record.role,
+        endpoint="/auth/login",
+        status_code=200,
+        detail=f"session_id={record.session_id}",
+    )
+    return {
+        "token": token,
+        "token_type": "Bearer",
+        "session_id": record.session_id,
+        "user_id": record.user_id,
+        "role": record.role,
+        "issued_at": record.issued_at.isoformat(),
+        "expires_at": record.expires_at.isoformat(),
+    }
+
+
+@app.post("/auth/logout")
+def auth_logout(
+    auth: AuthContext | None = Depends(
+        require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-59 / PLPT-60: Thu hồi phiên vào bảng revoked_sessions và ghi security_audit_logs."""
+    db_path = get_db_path()
+    sid = auth.session_id if auth and auth.session_id else ""
+    uid = auth.user_id if auth else None
+    role = auth.role if auth else None
+    if sid:
+        DEFAULT_SESSION_STORE.revoke_session(sid, db_path=db_path, user_id=uid, reason="USER_LOGOUT")
+    record_security_audit_log(
+        db_path,
+        event_type="AUTH_LOGOUT",
+        user_id=uid,
+        role=role,
+        endpoint="/auth/logout",
+        status_code=200,
+        detail=f"revoked session_id={sid}",
+    )
+    return {"revoked": True, "session_id": sid}
+
+
+@app.get("/admin/incident-hold")
+def get_admin_incident_hold(
+    _auth: AuthContext | None = Depends(
+        require_roles({"SUPERVISOR", "ADMINISTRATOR", "MODEL_REVIEWER"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-60 / SEC-08: Kiểm tra trạng thái khóa sự cố và mẫu báo cáo 4 giờ cho Purchaser."""
+    active = get_active_incident_hold(get_db_path())
+    return {
+        "active": active is not None,
+        "incident": active,
+        "sla_hours": 4.0,
+        "notification_template": {
+            "recipient": "SongNhat Purchaser Security & Business Owner",
+            "required_within_hours": 4,
+            "fields": ["incident_id", "severity", "affected_scope", "triggered_at", "containment_action"],
+        },
+    }
+
+
+@app.post("/admin/incident-hold")
+def post_admin_incident_hold(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-60 / SEC-08: Kích hoạt, ghi nhận thông báo 4h, hoặc mở khóa sự cố."""
+    action = str(payload.get("action") or "activate").strip().lower()
+    actor = auth.user_id if auth else "ADMINISTRATOR"
+    db_path = get_db_path()
+
+    try:
+        if action == "activate":
+            res = activate_emergency_hold(
+                db_path,
+                reason=str(payload.get("reason") or ""),
+                triggered_by=actor,
+                severity=str(payload.get("severity") or "CRITICAL"),
+                affected_scope=str(payload.get("affected_scope") or "ALL_QUEUES"),
+            )
+        elif action == "notify":
+            res = record_purchaser_notification(
+                db_path,
+                int(payload["incident_id"]),
+                notified_by=actor,
+                channel=str(payload.get("channel") or "OFFICIAL_EMAIL"),
+            )
+        elif action == "release":
+            res = release_emergency_hold(
+                db_path,
+                int(payload["incident_id"]),
+                released_by=actor,
+                resolution_note=str(payload.get("resolution_note") or ""),
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"action không hợp lệ: {action}")
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    record_security_audit_log(
+        db_path,
+        event_type=f"INCIDENT_HOLD_{action.upper()}",
+        user_id=actor,
+        role=auth.role if auth else None,
+        endpoint="/admin/incident-hold",
+        status_code=200,
+        detail=str(res),
+    )
+    return res
+
+
+@app.get("/admin/security-readiness")
+def get_admin_security_readiness(
+    auth: AuthContext | None = Depends(
+        require_roles({"ADMINISTRATOR", "MODEL_REVIEWER", "SUPERVISOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-60 / SEC-06 / Gate G2: Kiểm tra cấu hình bảo mật, môi trường, secret và nhật ký."""
+    db_path = get_db_path()
+    secret_ok = True
+    try:
+        secret = get_session_secret_key()
+        secret_is_placeholder = secret == "CHANGE_ME_LOCAL_DEV_PLACEHOLDER_ONLY"
+    except RuntimeError:
+        secret_ok = False
+        secret_is_placeholder = True
+
+    revoked_count = 0
+    audit_count = 0
+    if db_path.exists():
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                ensure_auth_tables(conn)
+                revoked_count = int(conn.execute("SELECT COUNT(*) FROM revoked_sessions").fetchone()[0])
+                audit_count = int(conn.execute("SELECT COUNT(*) FROM security_audit_logs").fetchone()[0])
+
+    record_security_audit_log(
+        db_path,
+        event_type="SECURITY_READINESS_CHECK",
+        user_id=auth.user_id if auth else None,
+        role=auth.role if auth else None,
+        endpoint="/admin/security-readiness",
+        status_code=200,
+    )
+    return {
+        "env_mode": get_env_mode(),
+        "rbac_enforced_v1": is_rbac_enforced_on_v1(),
+        "rbac_enforced_legacy": is_rbac_enforced_on_legacy(),
+        "allow_legacy_role_header": is_legacy_role_header_allowed(),
+        "session_ttl_minutes": get_session_ttl_minutes(),
+        "secret_configured": secret_ok and not secret_is_placeholder,
+        "active_sessions": DEFAULT_SESSION_STORE.active_session_count(),
+        "revoked_sessions_count": revoked_count,
+        "security_audit_logs_count": audit_count,
+        "active_incident_hold": get_active_incident_hold(db_path),
+    }
+
+
+# ============================================================================
+# PLPT-65: Shadow Scoring Summary & Manual/Auto Rules Fallback Endpoints
+# ============================================================================
+
+@app.get("/shadow/summary")
+def get_shadow_summary(
+    _auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR", "SUPERVISOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-65: Tổng hợp trạng thái định tuyến phục vụ, shadow_score_logs và batch_run_logs."""
+    db_path = get_db_path()
+    active_hold = get_active_incident_hold(db_path)
+    gate_g1_path = Path(__file__).resolve().parents[2] / "artifacts" / "gate_g1" / "gate_g1_benchmark_report.json"
+    manifest_path = Path(__file__).resolve().parents[2] / "artifacts" / "models" / "plpt-logreg-v1.0.0" / "manifest.json"
+    decision = resolve_serving_route(
+        gate_g1_report=gate_g1_path if gate_g1_path.exists() else None,
+        manifest=manifest_path if manifest_path.exists() else None,
+        incident_hold_active=active_hold is not None,
+    )
+
+    shadow_count = 0
+    latest_batch = None
+    if db_path.exists():
+        with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+            with conn:
+                ensure_shadow_score_table(conn)
+                ensure_batch_run_table(conn)
+                shadow_count = int(conn.execute("SELECT COUNT(*) FROM shadow_score_logs").fetchone()[0])
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM batch_run_logs ORDER BY id DESC LIMIT 1").fetchone()
+                latest_batch = dict(row) if row is not None else None
+
+    return {
+        "serving_route": decision.to_dict(),
+        "shadow_score_logs_count": shadow_count,
+        "latest_batch_run": latest_batch,
+    }
+
+
+@app.post("/shadow/fallback")
+def post_shadow_fallback(
+    payload: dict[str, Any] = Body(default={}),
+    auth: AuthContext | None = Depends(
+        require_roles({"MODEL_REVIEWER", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-65: Ép hoặc kiểm tra cơ chế quay về RULES_BASELINE khi có sự cố/drift/chưa duyệt Gate G1."""
+    drift_triggered = bool(payload.get("drift_fallback_triggered", True))
+    control_ok = bool(payload.get("control_health_ok", True))
+    decision = resolve_serving_route(
+        requested_mode="PREDICTIVE_ML",
+        drift_fallback_triggered=drift_triggered,
+        control_health_ok=control_ok,
+        incident_hold_active=get_active_incident_hold(get_db_path()) is not None,
+    )
+    record_security_audit_log(
+        get_db_path(),
+        event_type="SHADOW_FALLBACK_TRIGGERED",
+        user_id=auth.user_id if auth else None,
+        role=auth.role if auth else None,
+        endpoint="/shadow/fallback",
+        status_code=200,
+        detail=str(decision.to_dict()),
+    )
+    return decision.to_dict()
+
+
+@app.get("/admin/accounts")
+def get_admin_accounts(
+    _auth: AuthContext | None = Depends(
+        require_roles({"ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-59 / Quyết định PO #1: Danh bạ tài khoản nội bộ (tối đa 20 user)."""
+    accounts = list_internal_accounts(get_db_path())
+    return {"total": len(accounts), "max_users": 20, "accounts": accounts}
+
+
+@app.post("/admin/accounts")
+def post_admin_accounts(
+    payload: dict[str, Any] = Body(...),
+    auth: AuthContext | None = Depends(
+        require_roles({"ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+    ),
+) -> dict[str, Any]:
+    """PLPT-59 / Quyết định PO #1 & #2: Cấp/cập nhật/thu hồi tài khoản nội bộ gắn role, team_id, assigned_accounts."""
+    db_path = get_db_path()
+    res = upsert_internal_account(
+        db_path,
+        user_id=str(payload.get("user_id") or ""),
+        role=str(payload.get("role") or ""),
+        team_id=payload.get("team_id"),
+        assigned_accounts=payload.get("assigned_accounts") or [],
+        status=str(payload.get("status") or "ACTIVE"),
+        created_by=auth.user_id if auth else "ADMINISTRATOR",
+    )
+    record_security_audit_log(
+        db_path,
+        event_type="ADMIN_ACCOUNT_UPSERT",
+        user_id=auth.user_id if auth else "ADMINISTRATOR",
+        role=auth.role if auth else "ADMINISTRATOR",
+        endpoint="/admin/accounts",
+        status_code=200,
+        detail=f"target={res['user_id']} role={res['role']} status={res['status']}",
+    )
+    return res

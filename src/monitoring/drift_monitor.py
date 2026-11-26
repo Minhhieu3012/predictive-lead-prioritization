@@ -188,3 +188,62 @@ def assess_mature_ranking_drift(
         "reason": None if assessable else "INSUFFICIENT_MATURE_LABELS_OR_COVERAGE",
         "auto_retrain_allowed": False,
     }
+
+
+
+def ensure_drift_tables(conn) -> None:
+    """PLPT-71: Tạo bảng daily_drift_snapshots lưu kết quả giám sát trôi dạt hằng ngày."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_drift_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            as_of_date TEXT NOT NULL,
+            daily_volume INTEGER NOT NULL,
+            score_coverage_pct REAL NOT NULL,
+            unscored_count INTEGER NOT NULL,
+            missingness_json TEXT NOT NULL,
+            missingness_delta_json TEXT NOT NULL,
+            source_mix_json TEXT NOT NULL,
+            alerts_json TEXT NOT NULL,
+            investigation_triggered INTEGER NOT NULL,
+            recommended_fallback_to_rules INTEGER NOT NULL,
+            auto_retrain_allowed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def persist_daily_drift_snapshot(db_path: str, snapshot: dict[str, Any]) -> int:
+    """PLPT-71: Lưu snapshot giám sát trôi dạt hằng ngày vào bảng daily_drift_snapshots."""
+    import contextlib, json, sqlite3
+    created_at = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        with conn:
+            ensure_drift_tables(conn)
+            cur = conn.execute(
+                """
+                INSERT INTO daily_drift_snapshots (
+                    as_of_date, daily_volume, score_coverage_pct, unscored_count,
+                    missingness_json, missingness_delta_json, source_mix_json, alerts_json,
+                    investigation_triggered, recommended_fallback_to_rules,
+                    auto_retrain_allowed, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    str(snapshot["as_of_date"]),
+                    int(snapshot["daily_volume"]),
+                    float(snapshot["score_coverage_pct"]),
+                    int(snapshot["unscored_count"]),
+                    json.dumps(snapshot.get("missingness_pct", {}), ensure_ascii=False),
+                    json.dumps(snapshot.get("missingness_delta_pp", {}), ensure_ascii=False),
+                    json.dumps(snapshot.get("source_mix_pct", {}), ensure_ascii=False),
+                    json.dumps(snapshot.get("alerts", []), ensure_ascii=False),
+                    1 if snapshot.get("investigation_triggered") else 0,
+                    1 if snapshot.get("recommended_fallback_to_rules") else 0,
+                    created_at,
+                ),
+            )
+            row_id = int(cur.lastrowid)
+            conn.commit()
+            return row_id

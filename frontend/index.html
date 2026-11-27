@@ -289,15 +289,16 @@
             <button id="btn-g1-jump-accept-override" type="button" class="btn-primary">2.1–2.5 Mở Active (K) thao tác ACCEPT / OVERRIDE</button>
             <button id="btn-g1-refresh-isolation" type="button" class="btn-secondary">2.6 Làm mới bảng đối chiếu SQLite</button>
           </div>
+          <div id="g1-step2-msg" class="msg"></div>
           <details class="pipe-details">
-            <summary>Xem bảng staff_review_logs (ACCEPT_PRIORITY — 15 bản ghi mới nhất)</summary>
+            <summary id="g1-review-summary">Xem bảng staff_review_logs (ACCEPT_PRIORITY — tối đa 15 bản ghi mới nhất)</summary>
             <table>
               <thead><tr><th>id</th><th>enquiry_id</th><th>decision_type</th><th>contact_permission_verified</th><th>contact_attempted</th><th>reviewed_by</th><th>reviewed_at</th></tr></thead>
               <tbody id="g1-review-logs-body"></tbody>
             </table>
           </details>
           <details class="pipe-details">
-            <summary>Xem bảng staff_override_logs (OVERRIDE_PRIORITY — 15 bản ghi mới nhất)</summary>
+            <summary id="g1-override-summary">Xem bảng staff_override_logs (OVERRIDE_PRIORITY — tối đa 15 bản ghi mới nhất)</summary>
             <table>
               <thead><tr><th>id</th><th>enquiry_id</th><th>override_reason_code</th><th>justification</th><th>overridden_by</th><th>overridden_at</th></tr></thead>
               <tbody id="g1-override-logs-body"></tbody>

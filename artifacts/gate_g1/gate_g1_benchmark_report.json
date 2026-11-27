@@ -12,7 +12,7 @@
   },
   "sealed_cohort_fingerprint": "3363339bb3a57fdaa871f8132467c6371aded758331be6b75213a15d883644f9",
   "rules_baseline_metrics": {
-    "selected_count": 25,
+    "selected_count": 28,
     "precision_at_k_conservative": 0.0,
     "precision_at_k_upper_bound": 1.0,
     "recall_at_k": 0.0,
@@ -22,7 +22,7 @@
     "returning_account_precision_at_k": 0.0
   },
   "candidate_model_metrics": {
-    "selected_count": 25,
+    "selected_count": 28,
     "precision_at_k_conservative": 0.0,
     "precision_at_k_upper_bound": 1.0,
     "recall_at_k": 0.0,

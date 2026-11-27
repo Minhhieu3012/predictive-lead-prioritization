@@ -201,6 +201,20 @@ async function loadGateG1Console() {
       "Chưa có bản ghi trong staff_override_logs. Hãy qua tab Active (K) tick xác minh và bấm OVERRIDE."
     );
 
+    const reviewShown = (iso.staff_review_logs_preview || []).length;
+    const reviewTotal = iso.staff_review_logs_count ?? 0;
+    const reviewSumEl = document.getElementById("g1-review-summary");
+    if (reviewSumEl) {
+      reviewSumEl.textContent = `Xem bảng staff_review_logs (ACCEPT_PRIORITY — hiển thị ${reviewShown}/${reviewTotal}, tối đa 15 bản ghi mới nhất)`;
+    }
+
+    const overrideShown = (iso.staff_override_logs_preview || []).length;
+    const overrideTotal = iso.staff_override_logs_count ?? 0;
+    const overrideSumEl = document.getElementById("g1-override-summary");
+    if (overrideSumEl) {
+      overrideSumEl.textContent = `Xem bảng staff_override_logs (OVERRIDE_PRIORITY — hiển thị ${overrideShown}/${overrideTotal}, tối đa 15 bản ghi mới nhất)`;
+    }
+
     // Bước 3 (PLPT-26): Manifest & Pre-t0 features
     const mf = (data.manifest || {}).data;
     const mfChecks = (data.manifest || {}).checks || {};
@@ -425,13 +439,48 @@ function showCachedJsonInConsole(title, payloadObj) {
   setG1Banner("ok", `Đang hiển thị nội dung ${title} trong khung kết quả bên dưới.`);
 }
 
+async function handleRefreshIsolation() {
+  const btn = document.getElementById("btn-g1-refresh-isolation");
+  const msgEl = document.getElementById("g1-step2-msg");
+  if (btn) btn.disabled = true;
+  try {
+    await loadGateG1Console();
+    const nowStr = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+    const iso = (g1LatestEvidence && g1LatestEvidence.workspace_isolation) || {};
+    const summaryText =
+      `Đã đồng bộ lại từ data/songnhat.db lúc ${nowStr}: ` +
+      `staff_review_logs=${iso.staff_review_logs_count ?? 0}, ` +
+      `staff_override_logs=${iso.staff_override_logs_count ?? 0}, ` +
+      `raw_outcomes=${iso.raw_outcomes_count ?? 0} dòng (tách biệt hoàn toàn, không bị sửa đổi).`;
+    if (msgEl) {
+      msgEl.className = "msg ok";
+      msgEl.textContent = summaryText;
+    }
+    setG1ConsoleOutput(`Bước 2.6 Đối chiếu cô lập SQLite (${nowStr})`, JSON.stringify(iso, null, 2), true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleRefreshGateG1All() {
+  const btn = document.getElementById("btn-g1-refresh");
+  if (btn) btn.disabled = true;
+  try {
+    await loadGateG1Console();
+    const nowStr = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+    setG1Banner("ok", `Đã tải lại toàn bộ bằng chứng Sprint 3 & Gate G1 lúc ${nowStr}.`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function initGateG1ConsoleEvents() {
   const bind = (id, fn) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("click", fn);
   };
 
-  bind("btn-g1-refresh", loadGateG1Console);
+  bind("btn-g1-refresh", handleRefreshGateG1All);
   bind("btn-g1-restore-fresh", handleG1RestoreFresh);
 
   // Bước 1: PLPT-24
@@ -444,7 +493,7 @@ function initGateG1ConsoleEvents() {
 
   // Bước 2: PLPT-25
   bind("btn-g1-jump-accept-override", () => switchToWorkspaceTab("active", ""));
-  bind("btn-g1-refresh-isolation", loadGateG1Console);
+  bind("btn-g1-refresh-isolation", handleRefreshIsolation);
 
   // Bước 3: PLPT-26
   bind("btn-g1-test-plpt26", () => handleRunSprint3Check("btn-g1-test-plpt26", "plpt26_ml_eval"));

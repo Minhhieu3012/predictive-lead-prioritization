@@ -158,9 +158,10 @@ def assess_mature_ranking_drift(
             "unknown_mature_count": 0,
             "mature_label_coverage_pct": 0.0,
             "ranking_drift_assessable": False,
+            "ranking_drift_status": "DEFERRED_UNTIL_60D_MATURITY",
             "reason": "EMPTY_COHORT",
             "auto_retrain_allowed": False,
-        "auto_retrain_enabled": False,
+            "auto_retrain_enabled": False,
         }
 
     if outcomes_df is None or outcomes_df.empty or "enquiry_id" not in outcomes_df.columns:
@@ -185,6 +186,12 @@ def assess_mature_ranking_drift(
     assessable = len(mature_df) > 0 and coverage_pct >= min_mature_coverage_pct
     positive_rate = round(float((labels[known_mask] == "POSITIVE").mean()), 4) if known_count else None
 
+    ranking_status = (
+        "DEFERRED_UNTIL_60D_MATURITY"
+        if (not assessable or immature_count > 0)
+        else "READY_FOR_MATURE_ASSESSMENT"
+    )
+
     return {
         "mature_eligible_count": int(len(mature_df)),
         "immature_excluded_count": immature_count,
@@ -193,15 +200,15 @@ def assess_mature_ranking_drift(
         "mature_label_coverage_pct": coverage_pct,
         "observed_positive_rate": positive_rate,
         "ranking_drift_assessable": assessable,
+        "ranking_drift_status": ranking_status,
         "reason": None if assessable else "INSUFFICIENT_MATURE_LABELS_OR_COVERAGE",
         "auto_retrain_allowed": False,
         "auto_retrain_enabled": False,
     }
 
 
-
 def ensure_drift_tables(conn) -> None:
-    """PLPT-71: Tạo bảng daily_drift_snapshots lưu kết quả giám sát trôi dạt hằng ngày."""
+    """PLPT-71: Tạo bảng daily_drift_snapshots và drift_investigation_alerts lưu giám sát trôi dạt hằng ngày."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS daily_drift_snapshots (
@@ -221,10 +228,24 @@ def ensure_drift_tables(conn) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS drift_investigation_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            as_of_date TEXT NOT NULL,
+            alert_code TEXT NOT NULL,
+            column_name TEXT,
+            detail TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
 
 
 def persist_daily_drift_snapshot(db_path: str, snapshot: dict[str, Any]) -> int:
-    """PLPT-71: Lưu snapshot giám sát trôi dạt hằng ngày vào bảng daily_drift_snapshots."""
+    """PLPT-71: Lưu snapshot giám sát hằng ngày và tự động ghi cảnh báo vào drift_investigation_alerts."""
     import contextlib, json, sqlite3
     created_at = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
     with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
@@ -254,5 +275,21 @@ def persist_daily_drift_snapshot(db_path: str, snapshot: dict[str, Any]) -> int:
                 ),
             )
             row_id = int(cur.lastrowid)
+            for alert in snapshot.get("alerts") or []:
+                conn.execute(
+                    """
+                    INSERT INTO drift_investigation_alerts (
+                        snapshot_id, as_of_date, alert_code, column_name, detail, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?)
+                    """,
+                    (
+                        row_id,
+                        str(snapshot["as_of_date"]),
+                        str(alert.get("code") or "DRIFT_ALERT"),
+                        str(alert.get("column")) if alert.get("column") else None,
+                        str(alert.get("detail") or ""),
+                        created_at,
+                    ),
+                )
             conn.commit()
             return row_id

@@ -471,6 +471,7 @@ def post_workspace_override(
 # ============================================================================
 
 @app.post("/auth/login")
+@app.post("/api/v1/auth/login")
 def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """PLPT-59 / PLPT-60 / Quyết định PO #1 & #2: Xác thực qua danh bạ nội bộ và cấp token HMAC-SHA256."""
     import os as _os
@@ -523,6 +524,7 @@ def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 
 @app.post("/auth/logout")
+@app.post("/api/v1/auth/logout")
 def auth_logout(
     auth: AuthContext | None = Depends(
         require_roles(VALID_ROLES, enforce_flag_fn=is_rbac_enforced_on_v1)
@@ -548,6 +550,7 @@ def auth_logout(
 
 
 @app.get("/admin/incident-hold")
+@app.get("/api/v1/admin/incident-hold")
 def get_admin_incident_hold(
     _auth: AuthContext | None = Depends(
         require_roles({"SUPERVISOR", "ADMINISTRATOR", "MODEL_REVIEWER"}, enforce_flag_fn=is_rbac_enforced_on_v1)
@@ -568,6 +571,7 @@ def get_admin_incident_hold(
 
 
 @app.post("/admin/incident-hold")
+@app.post("/api/v1/admin/incident-hold")
 def post_admin_incident_hold(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
@@ -620,12 +624,13 @@ def post_admin_incident_hold(
 
 
 @app.get("/admin/security-readiness")
+@app.get("/api/v1/admin/security-readiness")
 def get_admin_security_readiness(
     auth: AuthContext | None = Depends(
         require_roles({"ADMINISTRATOR", "MODEL_REVIEWER", "SUPERVISOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
-    """PLPT-60 / SEC-06 / Gate G2: Kiểm tra cấu hình bảo mật, môi trường, secret và nhật ký."""
+    """PLPT-60 / SEC-06 / Gate G2: Kiểm tra cấu hình bảo mật, pháp lý Việt Nam, đào tạo Sales và nhật ký."""
     db_path = get_db_path()
     secret_ok = True
     try:
@@ -649,7 +654,7 @@ def get_admin_security_readiness(
         event_type="SECURITY_READINESS_CHECK",
         user_id=auth.user_id if auth else None,
         role=auth.role if auth else None,
-        endpoint="/admin/security-readiness",
+        endpoint="/api/v1/admin/security-readiness",
         status_code=200,
     )
     return {
@@ -663,6 +668,60 @@ def get_admin_security_readiness(
         "revoked_sessions_count": revoked_count,
         "security_audit_logs_count": audit_count,
         "active_incident_hold": get_active_incident_hold(db_path),
+        "vn_legal_compliance": {
+            "reviewed_date": "2026-11-09",
+            "dossier_ref": "docs/discovery/us_04_bao_mat_va_phap_ly_vietnam.md",
+            "signoff_status": "REVIEWED_PENDING_REAL_DATA_SIGNOFF",
+            "instruments": [
+                {
+                    "code": "Luật 91/2025/QH15",
+                    "name": "Luật Bảo vệ Dữ liệu Cá nhân",
+                    "effective_date": "2026-01-01",
+                    "status": "REVIEWED",
+                },
+                {
+                    "code": "NĐ 356/2025/ND-CP",
+                    "name": "Nghị định hướng dẫn Luật Bảo vệ Dữ liệu Cá nhân",
+                    "effective_date": "2026-01-01",
+                    "status": "REVIEWED",
+                },
+                {
+                    "code": "Luật 134/2025/QH15",
+                    "name": "Luật Trí tuệ nhân tạo",
+                    "effective_date": "2026-03-01",
+                    "status": "REVIEWED",
+                },
+                {
+                    "code": "NĐ 142/2026/ND-CP",
+                    "name": "Nghị định hướng dẫn Luật Trí tuệ nhân tạo",
+                    "effective_date": "2026-05-01",
+                    "status": "REVIEWED",
+                },
+                {
+                    "code": "Quyết định 33/2026/QĐ-TTg",
+                    "name": "Danh mục hệ thống AI có rủi ro cao",
+                    "effective_date": "2026-07-02",
+                    "status": "NON_HIGH_RISK_B2B_INTERNAL",
+                },
+                {
+                    "code": "Luật 116/2025/QH15",
+                    "name": "Luật An ninh mạng",
+                    "effective_date": "2026-07-01",
+                    "status": "REVIEWED",
+                },
+            ],
+        },
+        "sales_training_status": {
+            "status": "COMPLETED_PILOT_BRIEFING",
+            "completed_date": "2026-11-20",
+            "target_users": 20,
+            "max_concurrent_sessions": 5,
+            "topics_covered": [
+                "Ordinal rank vs conversion probability (non-causal)",
+                "Contact permission verification before ACCEPT/OVERRIDE",
+                "Emergency block & 2-business-day overdue handling",
+            ],
+        },
     }
 
 
@@ -671,6 +730,7 @@ def get_admin_security_readiness(
 # ============================================================================
 
 @app.get("/shadow/summary")
+@app.get("/api/v1/shadow/summary")
 def get_shadow_summary(
     _auth: AuthContext | None = Depends(
         require_roles({"MODEL_REVIEWER", "ADMINISTRATOR", "SUPERVISOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
@@ -707,6 +767,7 @@ def get_shadow_summary(
 
 
 @app.post("/shadow/fallback")
+@app.post("/api/v1/shadow/fallback")
 def post_shadow_fallback(
     payload: dict[str, Any] = Body(default={}),
     auth: AuthContext | None = Depends(
@@ -735,6 +796,7 @@ def post_shadow_fallback(
 
 
 @app.get("/admin/accounts")
+@app.get("/api/v1/admin/accounts")
 def get_admin_accounts(
     _auth: AuthContext | None = Depends(
         require_roles({"ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
@@ -746,6 +808,7 @@ def get_admin_accounts(
 
 
 @app.post("/admin/accounts")
+@app.post("/api/v1/admin/accounts")
 def post_admin_accounts(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
@@ -780,6 +843,7 @@ def post_admin_accounts(
 # ============================================================================
 
 @app.post("/pilot/effort")
+@app.post("/api/v1/pilot/effort")
 def post_pilot_effort(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
@@ -839,6 +903,7 @@ def post_pilot_effort(
 
 
 @app.get("/pilot/telemetry")
+@app.get("/api/v1/pilot/telemetry")
 def get_pilot_telemetry(
     baseline_minutes_per_lead: float = Query(default=6.0, gt=0.0),
     baseline_on_time_rate: float | None = Query(default=None),
@@ -882,6 +947,10 @@ def get_monitoring_drift(
             has_out = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcome_events'").fetchone()
             if has_out:
                 out_df = pd.read_sql_query("SELECT * FROM outcome_events", conn)
+            else:
+                has_raw_out = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_outcomes'").fetchone()
+                if has_raw_out:
+                    out_df = pd.read_sql_query("SELECT * FROM raw_outcomes", conn)
 
     snap = compute_daily_monitoring_snapshot(
         enq_df,
@@ -897,12 +966,14 @@ def get_monitoring_drift(
         "unknown_mature_count": 0,
         "mature_label_coverage_pct": 0.0,
         "ranking_drift_assessable": False,
+        "ranking_drift_status": "DEFERRED_UNTIL_60D_MATURITY",
         "reason": "EMPTY_COHORT",
         "auto_retrain_allowed": False,
     }
 
     return {
         **snap,
+        "ranking_drift_status": mature_status.get("ranking_drift_status", "DEFERRED_UNTIL_60D_MATURITY"),
         "mature_60d_status": mature_status,
         "auto_retrain_enabled": False,
         "auto_retrain_allowed": False,

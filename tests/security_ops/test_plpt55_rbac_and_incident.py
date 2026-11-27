@@ -208,3 +208,67 @@ def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monke
     # Logout ghi revoked_sessions -> dùng lại bị 401
     assert client.post("/auth/logout", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 200
     assert client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).status_code == 401
+
+
+def test_sprint4_po_v1_aliases_legal_readiness_and_drift_deferred(tmp_path: Path, monkeypatch):
+    import contextlib
+    import sqlite3
+    from fastapi.testclient import TestClient
+    from src.api.main import app
+    from src.security.auth import DEFAULT_SESSION_STORE
+    from tests.control_fixtures.fixtures_data import create_clean_db, make_cf_row
+
+    db_path = tmp_path / "po_sync.db"
+    now_iso = datetime.now(VN_TZ).replace(microsecond=0).isoformat()
+    rows = [
+        make_cf_row(
+            enquiry_id=f"SYNC-{i}",
+            account_key=f"ACCT-{i}",
+            spec_completeness="" if i < 2 else "Full",
+            t0_time=now_iso,
+            extraction_time=now_iso,
+            feature_event_time=now_iso,
+            feature_available_at=now_iso,
+        )
+        for i in range(10)
+    ]
+    create_clean_db(db_path, rows)
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("QUARANTINE_DIR", str(tmp_path / "q"))
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "false")
+    DEFAULT_SESSION_STORE._sessions.clear()
+
+    client = TestClient(app)
+    login = client.post("/api/v1/auth/login", json={"user_id": "admin_sync", "role": "ADMINISTRATOR"})
+    assert login.status_code == 200
+    hdr = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    # 1) /api/v1/admin/security-readiness có đủ metadata pháp lý VN & đào tạo Sales
+    sec = client.get("/api/v1/admin/security-readiness", headers=hdr)
+    assert sec.status_code == 200
+    sec_body = sec.json()
+    legal = sec_body["vn_legal_compliance"]
+    codes = {item["code"] for item in legal["instruments"]}
+    assert {"Luật 91/2025/QH15", "Luật 134/2025/QH15", "Quyết định 33/2026/QĐ-TTg", "Luật 116/2025/QH15"}.issubset(codes)
+    assert legal["reviewed_date"]
+    assert sec_body["sales_training_status"]["status"]
+
+    # 2) Alias /api/v1/admin/incident-hold, /api/v1/shadow/*, /api/v1/pilot/*
+    assert client.get("/api/v1/admin/incident-hold", headers=hdr).status_code == 200
+    assert client.get("/api/v1/shadow/summary", headers=hdr).status_code == 200
+    assert client.post("/api/v1/shadow/fallback", headers=hdr, json={"drift_fallback_triggered": True}).status_code == 200
+    assert client.get("/api/v1/pilot/telemetry", headers=hdr).status_code == 200
+
+    # 3) /api/v1/monitoring/drift có DEFERRED_UNTIL_60D_MATURITY & ghi drift_investigation_alerts
+    drift = client.get("/api/v1/monitoring/drift", headers=hdr)
+    assert drift.status_code == 200
+    drift_body = drift.json()
+    assert drift_body["ranking_drift_status"] == "DEFERRED_UNTIL_60D_MATURITY"
+    assert drift_body["auto_retrain_enabled"] is False
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        alert_count = conn.execute("SELECT COUNT(*) FROM drift_investigation_alerts").fetchone()[0]
+        assert alert_count >= 1
+
+    # 4) Alias /api/v1/auth/logout hoạt động và thu hồi phiên
+    assert client.post("/api/v1/auth/logout", headers=hdr).status_code == 200
+    assert client.get("/api/v1/admin/security-readiness", headers=hdr).status_code == 401

@@ -527,10 +527,16 @@ async function loadMonitoringDrift() {
   }
 
   const mature = data.mature_60d_status || {};
+  const rankingStatus = data.ranking_drift_status || mature.ranking_drift_status || "DEFERRED_UNTIL_60D_MATURITY";
+  const sourceMixEntries = Object.entries(data.source_mix_pct || {})
+    .map(([k, v]) => `${k}: ${v}%`)
+    .join(", ");
   metaEl.innerHTML = `
+    <strong>Khối lượng hằng ngày:</strong> ${data.daily_volume ?? 0} |
     <strong>Độ bao phủ chấm điểm:</strong> ${data.score_coverage_pct}% (Ngưỡng &ge; 90%) |
-    <strong>Chờ nhãn 60 ngày:</strong> ${mature.immature_excluded_count || 0} hồ sơ chưa chín |
+    <strong>Trạng thái đánh giá xếp hạng:</strong> <code>${rankingStatus}</code> (${mature.immature_excluded_count || 0} hồ sơ chưa chín 60 ngày) |
     <strong>auto_retrain_enabled:</strong> <code>${String(data.auto_retrain_enabled)}</code>
+    ${sourceMixEntries ? `<div style="margin-top:4px;"><strong>Cơ cấu kênh/nguồn:</strong> ${sourceMixEntries}</div>` : ""}
   `;
   if (data.alerts && data.alerts.length > 0) {
     alertsEl.className = "msg err";

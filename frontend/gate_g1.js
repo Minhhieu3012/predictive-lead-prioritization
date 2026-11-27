@@ -136,11 +136,13 @@ async function loadGateG1Console() {
   const monPanel = document.getElementById("monitoring-panel");
   const pipePanel = document.getElementById("pipeline-panel");
   const g1Panel = document.getElementById("gate-g1-panel");
+  const s4Panel = document.getElementById("sprint4-panel");
   if (!g1Panel) return;
 
   if (queueCard) queueCard.style.display = "none";
   if (monPanel) monPanel.style.display = "none";
   if (pipePanel) pipePanel.style.display = "none";
+  if (s4Panel) s4Panel.style.display = "none";
   g1Panel.style.display = "block";
 
   try {

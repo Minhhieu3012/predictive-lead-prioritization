@@ -67,6 +67,7 @@
         <button class="tab-btn" data-view="monitoring" type="button">Monitoring</button>
         <button class="tab-btn" id="tab-btn-pipeline" data-view="pipeline" type="button">Sprint 2 · Pipeline</button>
         <button class="tab-btn" id="tab-btn-gate-g1" data-view="gate_g1" type="button">Sprint 3 · Gate G1</button>
+        <button class="tab-btn" id="tab-btn-sprint4" data-view="sprint4" type="button">Sprint 4 · Security &amp; Ops</button>
         <select id="overflow-toggle" class="overflow-select">
           <option value="false">Chỉ Top-K hôm nay</option>
           <option value="true">Toàn bộ hàng đợi đã chấm điểm</option>
@@ -408,6 +409,214 @@
         </div>
       </div>
 
+      <!-- Sprint 4 Browser Console: PLPT-55 -> PLPT-58 & DoD -->
+      <div id="sprint4-panel" class="pipeline-panel" style="display:none;">
+        <div class="card">
+          <div class="pipeline-header">
+            <div>
+              <h3 class="pipeline-title">Bảng điều khiển Kiểm thử &amp; Vận hành Sprint 4 (PLPT-55 → PLPT-58 &amp; DoD)</h3>
+              <p class="pipeline-subtitle">Thao tác trực tiếp toàn bộ kiểm thử Auth HMAC, Khóa sự cố 4h, Shadow Fallback, Pilot 20BD, Drift Monitor và đối chiếu SQLite ngay trên trình duyệt. Khuyến nghị đăng nhập <code>ADMINISTRATOR</code> để thử đủ mọi endpoint; các nút <code>[DEV]</code> tự động khóa HTTP 403 ngoài <code>ENV_MODE=development</code> (SEC-06).</p>
+            </div>
+            <div class="pipeline-header-actions">
+              <span id="s4-env-mode" class="badge badge-info">ENV_MODE: -</span>
+              <span id="s4-freshness-badge" class="badge badge-info">DB Freshness: -</span>
+              <button id="btn-s4-restore-fresh" type="button" class="btn-secondary btn-sm dev-only-btn">[DEV] Bước 0: Làm tươi DB (&lt; 24h)</button>
+              <button id="btn-s4-refresh" type="button" class="btn-secondary btn-sm">Tải lại Sprint 4</button>
+            </div>
+          </div>
+          <div id="s4-msg" class="msg"></div>
+        </div>
+
+        <!-- Bước 1: PLPT-55 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 1 — PLPT-55 (US-15): RBAC 5 vai trò, Token HMAC + Logout thu hồi phiên, Bí mật &amp; Khóa sự cố 4 giờ</h4>
+          <div class="kpi-row">
+            <span id="s4-hold-status-badge" class="badge badge-ok">Khóa sự cố 4h: -</span>
+            <span id="s4-env-example-badge" class="badge badge-info">.env.example: -</span>
+            <span id="s4-revoked-count" class="kpi-pill">revoked_sessions: 0</span>
+            <span id="s4-audit-count" class="kpi-pill">security_audit_logs: 0</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-s4-test-plpt55" type="button" class="btn-secondary dev-only-btn">[DEV] 1.1 Chạy pytest test_plpt55_rbac_and_incident</button>
+            <button id="btn-s4-auth-flow" type="button" class="btn-primary">1.2 Test chuỗi Login → /api/block (403) → Logout → Reuse (401)</button>
+            <button id="btn-s4-sec-readiness" type="button" class="btn-secondary">1.3e Kiểm tra Security Readiness (Pháp lý VN &amp; Đào tạo Sales)</button>
+            <button id="btn-s4-view-env-example" type="button" class="btn-secondary">1.3f Xem .env.example</button>
+            <button id="btn-s4-git-secrets" type="button" class="btn-secondary dev-only-btn">[DEV] 1.3f Quét bí mật Git (gitleaks + chặn .env)</button>
+          </div>
+
+          <div class="block-form" style="margin-bottom:10px;">
+            <div class="field" style="max-width:160px;">
+              <label for="s4-inc-severity">Mức độ sự cố (severity)</label>
+              <select id="s4-inc-severity">
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="HIGH">HIGH</option>
+                <option value="MEDIUM">MEDIUM</option>
+                <option value="LOW">LOW</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="s4-inc-reason">Lý do kích hoạt khóa sự cố 4h</label>
+              <input id="s4-inc-reason" type="text" value="Demo test khóa sự cố 4 giờ" />
+            </div>
+            <div class="field" style="max-width:180px;">
+              <label for="s4-inc-channel">Kênh báo Purchaser</label>
+              <input id="s4-inc-channel" type="text" value="OFFICIAL_EMAIL" />
+            </div>
+            <div class="field">
+              <label for="s4-inc-resolution">Ghi chú mở khóa (release)</label>
+              <input id="s4-inc-resolution" type="text" value="Hoàn tất kiểm thử demo" />
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="btn-s4-inc-activate" type="button" class="btn-danger">1.3a Kích hoạt khóa sự cố (activate)</button>
+            <button id="btn-s4-inc-get" type="button" class="btn-secondary">1.3b Xem trạng thái &amp; mẫu báo cáo 4h (GET)</button>
+            <button id="btn-s4-inc-notify" type="button" class="btn-primary">1.3c Ghi nhận thông báo 4h (notify)</button>
+            <button id="btn-s4-inc-release" type="button" class="btn-primary">1.3d Mở khóa sự cố (release)</button>
+          </div>
+          <div id="s4-step1-msg" class="msg"></div>
+
+          <details class="pipe-details">
+            <summary id="s4-revoked-summary">Xem bảng revoked_sessions (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>session_id</th><th>user_id</th><th>revoked_at</th><th>reason</th></tr></thead>
+              <tbody id="s4-revoked-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary id="s4-audit-summary">Xem bảng security_audit_logs (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>event_type</th><th>user_id</th><th>role</th><th>endpoint</th><th>status</th><th>detail</th><th>created_at</th></tr></thead>
+              <tbody id="s4-audit-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary id="s4-incident-summary">Xem lịch sử bảng incident_holds (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>status</th><th>severity</th><th>reason</th><th>triggered_at</th><th>notify_deadline_at</th><th>notified_at</th><th>within_4h</th><th>released_at</th></tr></thead>
+              <tbody id="s4-incident-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 2: PLPT-56 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 2 — PLPT-56 (US-16): Xóa nợ 1.000/200, Shadow Scoring &amp; Fallback tự động về RULES_BASELINE</h4>
+          <div class="kpi-row">
+            <span id="s4-shadow-mode-badge" class="badge badge-info">Bấm "Xem Shadow Summary" để kiểm tra định tuyến</span>
+            <span id="s4-shadow-logs-count" class="kpi-pill">shadow_score_logs: 0</span>
+            <span id="s4-manifest-lock-badge" class="badge badge-ok">manifest.serving_mode_locked: -</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-s4-test-plpt56" type="button" class="btn-secondary dev-only-btn">[DEV] 2.1 Chạy pytest test_plpt56_shadow_and_fallback</button>
+            <button id="btn-s4-shadow-summary" type="button" class="btn-primary">2.2a Xem Shadow Summary (GET /api/v1/shadow/summary)</button>
+            <button id="btn-s4-shadow-fb-drift" type="button" class="btn-danger">2.2b Giả lập Fallback do Drift (POST /api/v1/shadow/fallback)</button>
+            <button id="btn-s4-shadow-fb-ctrl" type="button" class="btn-secondary">2.2c Giả lập Fallback do Lỗi kiểm soát (control_health_ok=false)</button>
+          </div>
+          <div id="s4-step2-msg" class="msg"></div>
+          <details class="pipe-details">
+            <summary id="s4-batch-summary">Xem bảng batch_run_logs (tối đa 10 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>run_type</th><th>scoring_mode</th><th>status</th><th>rows_processed</th><th>started_at</th></tr></thead>
+              <tbody id="s4-batch-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 3: PLPT-57 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 3 — PLPT-57 (US-17): Hiệu năng p95 &le; 3.0s, Phân bổ Tài khoản (0 xung đột) &amp; Telemetry Pilot 20 ngày làm việc</h4>
+          <div class="kpi-row">
+            <span id="s4-pilot-assign-count" class="kpi-pill">pilot_assignments: 0</span>
+            <span id="s4-pilot-conflict-badge" class="badge badge-ok">conflicting_accounts: 0</span>
+            <span id="s4-pilot-iso-counts" class="kpi-pill">exposure_logs: 0 | staff_override_logs: 0 | raw_outcomes: 0</span>
+          </div>
+          <div class="block-form" style="margin-bottom:10px;">
+            <div class="field" style="max-width:260px;">
+              <label for="s4-pilot-acct">Mã khách hàng test nhất quán (account_key)</label>
+              <input id="s4-pilot-acct" type="text" value="ACCT-DEMO-01" />
+            </div>
+            <button id="btn-s4-pilot-pair" type="button" class="btn-primary">3.2a Ghi 2 yêu cầu cùng account_key (SN-0001 &amp; SN-0002)</button>
+            <button id="btn-s4-pilot-telemetry" type="button" class="btn-secondary">3.2b Xem Telemetry 20 ngày làm việc (GET /api/v1/pilot/telemetry)</button>
+            <button id="btn-s4-test-plpt57" type="button" class="btn-secondary dev-only-btn">[DEV] 3.1 Chạy pytest PLPT-57 (100 req / 5 luồng, p95 &le; 3.0s)</button>
+          </div>
+          <div id="s4-step3-msg" class="msg"></div>
+
+          <details class="pipe-details">
+            <summary id="s4-pilot-assign-summary">Xem bảng pilot_assignments (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>assignment_key</th><th>account_key</th><th>treatment_arm</th><th>assigned_at</th></tr></thead>
+              <tbody id="s4-pilot-assign-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary id="s4-exposure-summary">Xem bảng exposure_logs (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>enquiry_id</th><th>account_key</th><th>staff_id</th><th>treatment_arm</th><th>scoring_mode</th><th>exposed_at</th></tr></thead>
+              <tbody id="s4-exposure-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary id="s4-effort-summary">Xem bảng pilot_effort_logs (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>business_date</th><th>staff_id</th><th>treatment_arm</th><th>enquiries_reviewed</th><th>queue_prep_min</th><th>triage_sec</th><th>logged_at</th></tr></thead>
+              <tbody id="s4-effort-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 4: PLPT-58 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 4 — PLPT-58 (US-18): Giám sát Drift hằng ngày, Cảnh báo +10pp / &lt; 90% &amp; Khóa auto_retrain_enabled = false</h4>
+          <div class="kpi-row">
+            <span id="s4-drift-status-badge" class="badge badge-info">Bấm "4.2a Kiểm tra Drift" để xem trạng thái hiện tại</span>
+            <span id="s4-drift-db-counts" class="kpi-pill">daily_drift_snapshots: 0 | drift_investigation_alerts: 0</span>
+            <span class="badge badge-info">Ranh giới Sprint 4: chỉ chấm phần drift (không gộp ops Sprint 5)</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-s4-test-plpt58" type="button" class="btn-secondary dev-only-btn">[DEV] 4.1 Chạy pytest Drift Monitor (-k drift)</button>
+            <button id="btn-s4-check-drift" type="button" class="btn-primary">4.2a Kiểm tra GET /api/v1/monitoring/drift</button>
+            <button id="btn-s4-jump-monitoring" type="button" class="btn-secondary">4.2b Mở tab Monitoring trực quan</button>
+            <button id="btn-s4-sim-drift" type="button" class="btn-danger dev-only-btn">[DEV] 4.3a Giả lập Drift &ge; +10pp &amp; Coverage &lt; 90% (200 dòng)</button>
+            <button id="btn-s4-restore-drift" type="button" class="btn-primary dev-only-btn">[DEV] 4.3b Khôi phục dữ liệu sạch (csv_validator + deduplicator)</button>
+          </div>
+          <div id="s4-step4-msg" class="msg"></div>
+
+          <details class="pipe-details">
+            <summary id="s4-drift-alerts-summary">Xem bảng drift_investigation_alerts (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>snapshot_id</th><th>as_of_date</th><th>alert_code</th><th>column_name</th><th>detail</th><th>status</th><th>created_at</th></tr></thead>
+              <tbody id="s4-drift-alerts-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary id="s4-drift-snaps-summary">Xem bảng daily_drift_snapshots (tối đa 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>as_of_date</th><th>daily_volume</th><th>score_coverage_pct</th><th>unscored_count</th><th>investigation_triggered</th><th>auto_retrain</th><th>created_at</th></tr></thead>
+              <tbody id="s4-drift-snaps-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 5: DoD Sprint 4 & Hồi quy -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 5 — Kiểm thử DoD chung Sprint 4 &amp; Hồi quy toàn dự án (DEV ONLY)</h4>
+          <div class="btn-row">
+            <button id="btn-s4-dod-4suites" type="button" class="btn-primary dev-only-btn">[DEV] 5.1 Chạy 4 bộ test Sprint 4 (PLPT-55..PLPT-58)</button>
+            <button id="btn-s4-dod-full" type="button" class="btn-secondary dev-only-btn">[DEV] 5.2 Hồi quy toàn dự án (pytest -v) + 40/40 Control Fixtures</button>
+            <button id="btn-s4-dod-gitleaks" type="button" class="btn-secondary dev-only-btn">[DEV] 5.3 Quét bảo mật bí mật Git (pre-commit gitleaks)</button>
+          </div>
+        </div>
+
+        <!-- Hộp xem kết quả chi tiết / JSON / Pytest Output -->
+        <div class="card">
+          <div class="pipeline-header">
+            <strong>Kết quả kiểm tra chi tiết Sprint 4 (Auth / Incident Hold / Shadow / Pilot / Drift / Pytest)</strong>
+            <span id="s4-console-title" class="badge badge-info">Sẵn sàng</span>
+          </div>
+          <pre id="s4-console-output" class="console-pre">Chọn một thao tác Sprint 4 ở trên để xem kết quả kiểm chứng ngay trên trình duyệt.</pre>
+        </div>
+      </div>
+
       <div class="card" id="queue-card">
         <table>
           <thead>
@@ -455,6 +664,7 @@
   <script src="./app.js" defer></script>
   <script src="./pipeline.js" defer></script>
   <script src="./gate_g1.js" defer></script>
+  <script src="./sprint4.js" defer></script>
 </body>
 </html>
 

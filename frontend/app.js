@@ -58,7 +58,11 @@ function showWorkspace() {
   if (g1Tab) {
     g1Tab.style.display = canSeeOpsTabs ? "inline-block" : "none";
   }
-  if (!canSeeOpsTabs && (currentView === "pipeline" || currentView === "gate_g1")) {
+  const s4Tab = document.getElementById("tab-btn-sprint4");
+  if (s4Tab) {
+    s4Tab.style.display = canSeeOpsTabs ? "inline-block" : "none";
+  }
+  if (!canSeeOpsTabs && (currentView === "pipeline" || currentView === "gate_g1" || currentView === "sprint4")) {
     currentView = "active";
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === "active"));
   }
@@ -262,14 +266,17 @@ async function loadQueue() {
   const monPanel = document.getElementById("monitoring-panel");
   const pipePanel = document.getElementById("pipeline-panel");
   const g1Panel = document.getElementById("gate-g1-panel");
+  const s4Panel = document.getElementById("sprint4-panel");
   if (currentView === "monitoring") {
     if (pipePanel) pipePanel.style.display = "none";
     if (g1Panel) g1Panel.style.display = "none";
+    if (s4Panel) s4Panel.style.display = "none";
     await loadMonitoringDrift();
     return;
   }
   if (currentView === "pipeline") {
     if (g1Panel) g1Panel.style.display = "none";
+    if (s4Panel) s4Panel.style.display = "none";
     if (typeof loadPipelineConsole === "function") {
       await loadPipelineConsole();
     }
@@ -277,8 +284,17 @@ async function loadQueue() {
   }
   if (currentView === "gate_g1") {
     if (pipePanel) pipePanel.style.display = "none";
+    if (s4Panel) s4Panel.style.display = "none";
     if (typeof loadGateG1Console === "function") {
       await loadGateG1Console();
+    }
+    return;
+  }
+  if (currentView === "sprint4") {
+    if (pipePanel) pipePanel.style.display = "none";
+    if (g1Panel) g1Panel.style.display = "none";
+    if (typeof loadSprint4Console === "function") {
+      await loadSprint4Console();
     }
     return;
   }
@@ -291,6 +307,9 @@ async function loadQueue() {
   }
   if (g1Panel) {
     g1Panel.style.display = "none";
+  }
+  if (s4Panel) {
+    s4Panel.style.display = "none";
   }
   const qVal = document.getElementById("search-query").value.trim();
   const incOverflow = document.getElementById("overflow-toggle").value === "true";

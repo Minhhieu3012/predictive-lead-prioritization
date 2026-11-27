@@ -442,3 +442,15 @@ tbody tr.row-blocking td {
   word-break: break-word;
 }
 
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cf-pill {
+  text-align: center;
+  font-size: 11px;
+}
+

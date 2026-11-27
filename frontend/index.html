@@ -66,6 +66,7 @@
         <button class="tab-btn" data-view="quarantine" type="button">Quarantine</button>
         <button class="tab-btn" data-view="monitoring" type="button">Monitoring</button>
         <button class="tab-btn" id="tab-btn-pipeline" data-view="pipeline" type="button">Sprint 2 · Pipeline</button>
+        <button class="tab-btn" id="tab-btn-gate-g1" data-view="gate_g1" type="button">Sprint 3 · Gate G1</button>
         <select id="overflow-toggle" class="overflow-select">
           <option value="false">Chỉ Top-K hôm nay</option>
           <option value="true">Toàn bộ hàng đợi đã chấm điểm</option>
@@ -241,6 +242,171 @@
         </div>
       </div>
 
+      <!-- Sprint 3 Browser Console: PLPT-24 -> PLPT-28 & DoD -->
+      <div id="gate-g1-panel" class="pipeline-panel" style="display:none;">
+        <div class="card">
+          <div class="pipeline-header">
+            <div>
+              <h3 class="pipeline-title">Bảng điều khiển Kiểm thử &amp; Bằng chứng Gate G1 Sprint 3 (PLPT-24 → PLPT-28 &amp; DoD)</h3>
+              <p class="pipeline-subtitle">Đối chiếu toàn bộ kiểm thử Workspace, cô lập DB (<code>staff_review_logs</code> / <code>staff_override_logs</code> vs <code>raw_outcomes</code>), <code>manifest.json</code>, 40 Control Fixtures và Temporal Benchmark ngay trên trình duyệt. Nút gắn nhãn <code>[DEV]</code> bị khóa cứng ngoài <code>ENV_MODE=development</code> (SEC-06).</p>
+            </div>
+            <div class="pipeline-header-actions">
+              <span id="g1-env-mode" class="badge badge-info">ENV_MODE: -</span>
+              <span id="g1-freshness-badge" class="badge badge-info">DB Freshness: -</span>
+              <button id="btn-g1-restore-fresh" type="button" class="btn-secondary btn-sm dev-only-btn">[DEV] Bước 0: Làm tươi DB (&lt; 24h)</button>
+              <button id="btn-g1-refresh" type="button" class="btn-secondary btn-sm">Tải lại bằng chứng Gate G1</button>
+            </div>
+          </div>
+          <div id="g1-msg" class="msg"></div>
+        </div>
+
+        <!-- Bước 1: PLPT-24 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 1 — PLPT-24 (US-10): Sales Workspace, Capacity K, 10% Exploration, Tiếng Việt &amp; Chặn Direct URL / Phiên hết hạn (HTTP 401)</h4>
+          <div class="kpi-row">
+            <span id="g1-401-badge" class="badge badge-info">Chưa chạy kiểm chứng HTTP 401</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-g1-test-plpt24" type="button" class="btn-secondary dev-only-btn">[DEV] 1.1 Chạy pytest test_sprint3_workspace</button>
+            <button id="btn-g1-test-401" type="button" class="btn-primary">1.2 Test trực tiếp Direct URL &amp; Phiên hết hạn (HTTP 401)</button>
+            <button id="btn-g1-jump-search" type="button" class="btn-secondary">1.3 Mở Active (K) · Tìm "bien tan"</button>
+            <button id="btn-g1-jump-unscored" type="button" class="btn-secondary">1.3 Mở Unscored</button>
+            <button id="btn-g1-jump-quarantine" type="button" class="btn-secondary">1.3 Mở Quarantine (10 lỗi)</button>
+            <button id="btn-g1-test-plpt57" type="button" class="btn-secondary dev-only-btn">[DEV] 1.3 Chạy pytest PLPT-57 (p95 &le; 3.0s)</button>
+          </div>
+        </div>
+
+        <!-- Bước 2: PLPT-25 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 2 — PLPT-25 (US-11): Quá hạn 2BD, ACCEPT / OVERRIDE &amp; Đối chiếu cô lập dữ liệu trong SQLite (thay SQLite Viewer)</h4>
+          <div class="kpi-row">
+            <span id="g1-review-count" class="kpi-pill">staff_review_logs: 0</span>
+            <span id="g1-override-count" class="kpi-pill">staff_override_logs: 0</span>
+            <span id="g1-outcomes-summary" class="kpi-pill">raw_outcomes: -</span>
+            <span id="g1-isolation-badge" class="badge badge-ok">Cô lập CF-29</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-g1-jump-accept-override" type="button" class="btn-primary">2.1–2.5 Mở Active (K) thao tác ACCEPT / OVERRIDE</button>
+            <button id="btn-g1-refresh-isolation" type="button" class="btn-secondary">2.6 Làm mới bảng đối chiếu SQLite</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem bảng staff_review_logs (ACCEPT_PRIORITY — 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>enquiry_id</th><th>decision_type</th><th>contact_permission_verified</th><th>contact_attempted</th><th>reviewed_by</th><th>reviewed_at</th></tr></thead>
+              <tbody id="g1-review-logs-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary>Xem bảng staff_override_logs (OVERRIDE_PRIORITY — 15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>id</th><th>enquiry_id</th><th>override_reason_code</th><th>justification</th><th>overridden_by</th><th>overridden_at</th></tr></thead>
+              <tbody id="g1-override-logs-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 3: PLPT-26 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 3 — PLPT-26 (US-12): Pre-t0 Feature Store, Ứng viên ML, Explainer &amp; Kiểm tra manifest.json</h4>
+          <div class="kpi-row">
+            <span id="g1-mf-model" class="kpi-pill">Model: -</span>
+            <span id="g1-mf-features" class="kpi-pill">Đặc trưng: -</span>
+            <span id="g1-mf-tolerance" class="kpi-pill">tolerance: -</span>
+            <span id="g1-mf-serving-lock" class="badge badge-info">serving_mode_locked: -</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-g1-test-plpt26" type="button" class="btn-secondary dev-only-btn">[DEV] 3.1 Chạy pytest ML, Pre-t0, Shadow &amp; Fallback</button>
+            <button id="btn-g1-view-manifest" type="button" class="btn-primary">3.2 Xem toàn bộ JSON manifest.json</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem danh sách feature_columns_used trong manifest.json</summary>
+            <table>
+              <thead><tr><th>#</th><th>Tên đặc trưng pre-t0</th><th>Kiểm tra tuân thủ</th></tr></thead>
+              <tbody id="g1-mf-features-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 4: PLPT-27 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 4 — PLPT-27 (US-13): Bộ 40 Control Fixtures (CF-01 → CF-40)</h4>
+          <div class="kpi-row">
+            <span id="g1-cf-summary" class="kpi-pill">Chưa có báo cáo 40 Control Fixtures</span>
+            <span id="g1-cf-status" class="badge badge-info">Status: -</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-g1-run-cf40-script" type="button" class="btn-primary dev-only-btn">[DEV] 4.1 Chạy run_control_fixtures.py (Xuất 40 CF JSON)</button>
+            <button id="btn-g1-run-cf40-pytest" type="button" class="btn-secondary dev-only-btn">[DEV] 4.2 Chạy pytest tests/control_fixtures/ (CF-01..40 + CF-09)</button>
+            <button id="btn-g1-view-cf-json" type="button" class="btn-secondary">4.3 Xem JSON control_fixtures_report.json</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem ma trận trạng thái 40 Control Fixtures (CF-01 → CF-40)</summary>
+            <div id="g1-cf-grid" class="cf-grid"></div>
+          </details>
+        </div>
+
+        <!-- Bước 5: PLPT-28 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 5 — PLPT-28 (US-14): Temporal Benchmark, Paired Bootstrap 95% CI, Single-Use Lock &amp; Gate G1</h4>
+          <div class="kpi-row">
+            <span id="g1-decision-badge" class="badge badge-warn">gate_g1_decision: -</span>
+            <span id="g1-active-mode-badge" class="badge badge-ok">active_serving_mode: -</span>
+            <span id="g1-lock-count-badge" class="badge badge-info">Sealed Cohort Locks: -</span>
+          </div>
+          <div class="kpi-row">
+            <span id="g1-cohort-counts" class="kpi-pill">cohort_counts: -</span>
+          </div>
+          <div class="kpi-row">
+            <span id="g1-lift-summary" class="kpi-pill">lift_and_uncertainty: -</span>
+          </div>
+          <div id="g1-criteria-grid" class="kpi-row"></div>
+          <div id="g1-failed-criteria" class="factor-ts" style="margin-bottom:8px;"></div>
+          <div id="g1-disclaimer-text" class="factor-ts" style="margin-bottom:10px;"></div>
+          <div class="btn-row">
+            <button id="btn-g1-view-benchmark-json" type="button" class="btn-secondary">5.1 Xem JSON gate_g1_benchmark_report.json</button>
+            <button id="btn-g1-view-locks-json" type="button" class="btn-secondary">5.1 Xem JSON sealed_cohort_locks.json</button>
+            <button id="btn-g1-verify-single-use" type="button" class="btn-primary dev-only-btn">[DEV] 5.2 Kiểm chứng chốt khóa Single-Use (Kỳ vọng chặn tái đánh giá)</button>
+            <button id="btn-g1-demo-fresh-eval" type="button" class="btn-secondary dev-only-btn">[DEV] 5.2 Demo chạy lại SYNTHETIC (Sao lưu &amp; tự khôi phục khóa)</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem bảng so sánh Rules Baseline vs Candidate Model (Segment Breakdown)</summary>
+            <table>
+              <thead><tr><th>Chỉ số đánh giá</th><th>Rules Baseline</th><th>Candidate Model</th></tr></thead>
+              <tbody id="g1-benchmark-metrics-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary>Xem danh sách tập test đã niêm phong (sealed_cohort_locks.json)</summary>
+            <table>
+              <thead><tr><th>Fingerprint</th><th>training_cutoff_t0</th><th>row_count</th><th>locked_at</th></tr></thead>
+              <tbody id="g1-sealed-locks-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 6: DoD Sprint 3 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 6 — Kiểm thử DoD chung Sprint 3 (Chạy tổng hợp 1 lần — DEV ONLY)</h4>
+          <div class="kpi-row">
+            <span id="g1-dod-cf" class="badge badge-info">40/40 Control Fixtures: -</span>
+            <span id="g1-dod-rules-lock" class="badge badge-info">Gate G1 &amp; Manifest: -</span>
+            <span id="g1-dod-single-use" class="badge badge-info">Single-Use Lock: -</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-g1-dod-all" type="button" class="btn-primary dev-only-btn">[DEV] 6.1 Chạy tổng hợp DoD Sprint 3 (pytest Workspace + ML + CF40 + xuất báo cáo)</button>
+          </div>
+        </div>
+
+        <!-- Hộp xem kết quả chi tiết / JSON / Pytest Output -->
+        <div class="card">
+          <div class="pipeline-header">
+            <strong>Kết quả kiểm tra chi tiết Sprint 3 (HTTP 401 / JSON Artifact / Pytest / Gate G1)</strong>
+            <span id="g1-console-title" class="badge badge-info">Sẵn sàng</span>
+          </div>
+          <pre id="g1-console-output" class="console-pre">Chọn một thao tác Sprint 3 ở trên để xem kết quả kiểm chứng ngay trên trình duyệt.</pre>
+        </div>
+      </div>
+
       <div class="card" id="queue-card">
         <table>
           <thead>
@@ -287,6 +453,7 @@
 
   <script src="./app.js" defer></script>
   <script src="./pipeline.js" defer></script>
+  <script src="./gate_g1.js" defer></script>
 </body>
 </html>
 

@@ -167,9 +167,19 @@ def serve_workspace_pipeline_js() -> FileResponse:
     return FileResponse(js_path, media_type="application/javascript; charset=utf-8")
 
 
+@app.get("/gate_g1.js", include_in_schema=False)
+def serve_workspace_gate_g1_js() -> FileResponse:
+    js_path = FRONTEND_DIR / "gate_g1.js"
+    if not js_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy frontend/gate_g1.js.")
+    return FileResponse(js_path, media_type="application/javascript; charset=utf-8")
+
+
+from src.api.gate_g1_routes import router as gate_g1_router
 from src.api.pipeline_routes import router as pipeline_router
 
 app.include_router(pipeline_router)
+app.include_router(gate_g1_router)
 
 
 @app.get("/favicon.ico", include_in_schema=False)

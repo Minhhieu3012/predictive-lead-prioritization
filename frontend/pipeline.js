@@ -52,10 +52,12 @@ async function loadPipelineConsole() {
   const queueCard = document.getElementById("queue-card");
   const monPanel = document.getElementById("monitoring-panel");
   const pipePanel = document.getElementById("pipeline-panel");
+  const g1Panel = document.getElementById("gate-g1-panel");
   if (!pipePanel) return;
 
   if (queueCard) queueCard.style.display = "none";
   if (monPanel) monPanel.style.display = "none";
+  if (g1Panel) g1Panel.style.display = "none";
   pipePanel.style.display = "block";
 
   try {

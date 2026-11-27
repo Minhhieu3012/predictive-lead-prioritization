@@ -49,14 +49,18 @@ function showWorkspace() {
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("workspace-screen").style.display = "block";
   document.getElementById("current-role").textContent = sess.role;
+  const canSeeOpsTabs = ["DATA_STEWARD", "SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"].includes(sess.role);
   const pipeTab = document.getElementById("tab-btn-pipeline");
   if (pipeTab) {
-    const canSeePipe = ["DATA_STEWARD", "SUPERVISOR", "MODEL_REVIEWER", "ADMINISTRATOR"].includes(sess.role);
-    pipeTab.style.display = canSeePipe ? "inline-block" : "none";
-    if (!canSeePipe && currentView === "pipeline") {
-      currentView = "active";
-      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === "active"));
-    }
+    pipeTab.style.display = canSeeOpsTabs ? "inline-block" : "none";
+  }
+  const g1Tab = document.getElementById("tab-btn-gate-g1");
+  if (g1Tab) {
+    g1Tab.style.display = canSeeOpsTabs ? "inline-block" : "none";
+  }
+  if (!canSeeOpsTabs && (currentView === "pipeline" || currentView === "gate_g1")) {
+    currentView = "active";
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === "active"));
   }
   loadQueue();
   loadPilotTelemetry();
@@ -257,14 +261,24 @@ async function loadQueue() {
   const queueCard = document.getElementById("queue-card");
   const monPanel = document.getElementById("monitoring-panel");
   const pipePanel = document.getElementById("pipeline-panel");
+  const g1Panel = document.getElementById("gate-g1-panel");
   if (currentView === "monitoring") {
     if (pipePanel) pipePanel.style.display = "none";
+    if (g1Panel) g1Panel.style.display = "none";
     await loadMonitoringDrift();
     return;
   }
   if (currentView === "pipeline") {
+    if (g1Panel) g1Panel.style.display = "none";
     if (typeof loadPipelineConsole === "function") {
       await loadPipelineConsole();
+    }
+    return;
+  }
+  if (currentView === "gate_g1") {
+    if (pipePanel) pipePanel.style.display = "none";
+    if (typeof loadGateG1Console === "function") {
+      await loadGateG1Console();
     }
     return;
   }
@@ -274,6 +288,9 @@ async function loadQueue() {
   }
   if (pipePanel) {
     pipePanel.style.display = "none";
+  }
+  if (g1Panel) {
+    g1Panel.style.display = "none";
   }
   const qVal = document.getElementById("search-query").value.trim();
   const incOverflow = document.getElementById("overflow-toggle").value === "true";

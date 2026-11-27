@@ -159,6 +159,19 @@ def serve_workspace_js() -> FileResponse:
     return FileResponse(js_path, media_type="application/javascript; charset=utf-8")
 
 
+@app.get("/pipeline.js", include_in_schema=False)
+def serve_workspace_pipeline_js() -> FileResponse:
+    js_path = FRONTEND_DIR / "pipeline.js"
+    if not js_path.exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy frontend/pipeline.js.")
+    return FileResponse(js_path, media_type="application/javascript; charset=utf-8")
+
+
+from src.api.pipeline_routes import router as pipeline_router
+
+app.include_router(pipeline_router)
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     return Response(status_code=204)

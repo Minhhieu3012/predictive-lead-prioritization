@@ -65,6 +65,7 @@
         <button class="tab-btn" data-view="unscored" type="button">Unscored</button>
         <button class="tab-btn" data-view="quarantine" type="button">Quarantine</button>
         <button class="tab-btn" data-view="monitoring" type="button">Monitoring</button>
+        <button class="tab-btn" id="tab-btn-pipeline" data-view="pipeline" type="button">Sprint 2 · Pipeline</button>
         <select id="overflow-toggle" class="overflow-select">
           <option value="false">Chỉ Top-K hôm nay</option>
           <option value="true">Toàn bộ hàng đợi đã chấm điểm</option>
@@ -114,6 +115,132 @@
         </table>
       </div>
 
+      <!-- Sprint 2 Browser Console: PLPT-14 -> PLPT-17 & DoD -->
+      <div id="pipeline-panel" class="pipeline-panel" style="display:none;">
+        <div class="card">
+          <div class="pipeline-header">
+            <div>
+              <h3 class="pipeline-title">Bảng điều khiển Kiểm thử & Vận hành Sprint 2 (PLPT-14 → PLPT-17 &amp; DoD)</h3>
+              <p class="pipeline-subtitle">Thao tác trực tiếp toàn bộ quy trình Sprint 2 trên trình duyệt; các nút gắn nhãn <code>[DEV]</code> tự động khóa ngoài <code>ENV_MODE=development</code> (SEC-06).</p>
+            </div>
+            <div class="pipeline-header-actions">
+              <span id="pipe-env-mode" class="badge badge-info">ENV_MODE: -</span>
+              <button id="btn-pipe-refresh" type="button" class="btn-secondary btn-sm">Tải lại trạng thái DB</button>
+            </div>
+          </div>
+          <div id="pipeline-msg" class="msg"></div>
+        </div>
+
+        <!-- Bước 1: PLPT-14 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 1 — PLPT-14 (US-06): Nạp 2 schema CSV, Idempotent, Quarantine &amp; Lọc PII/Leakage</h4>
+          <div class="kpi-row">
+            <span id="pipe-csv-count" class="kpi-pill">CSV: -</span>
+            <span id="pipe-raw-count" class="kpi-pill">DB Raw: -</span>
+            <span id="pipe-pii-status" class="badge badge-info">Kiểm tra *_DO_NOT_USE...</span>
+            <span id="pipe-unknown-count" class="kpi-pill">Unknown / Quarantine: -</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-pipe-gen-syn" type="button" class="btn-secondary dev-only-btn">[DEV] 1.1 Sinh dữ liệu giả lập (1.260 dòng)</button>
+            <button id="btn-pipe-us03" type="button" class="btn-primary">1.1 Chạy kiểm toán US-03</button>
+            <button id="btn-pipe-ingest" type="button" class="btn-primary">1.2 Nạp CSV (Bấm 2 lần kiểm Idempotent)</button>
+            <button id="btn-test-plpt14" type="button" class="btn-secondary dev-only-btn">[DEV] 1.4 Chạy pytest test_pipeline_sync</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem kết quả kiểm toán US-03 (AC1–AC4)</summary>
+            <table>
+              <thead><tr><th>Hạng mục</th><th>Trạng thái</th><th>Chi tiết</th></tr></thead>
+              <tbody id="pipe-us03-body"><tr><td colspan="3">Bấm "1.1 Chạy kiểm toán US-03" để xem 10 tiêu chí kiểm tra.</td></tr></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary>Xem danh sách lỗi Quarantine (data/quarantine/quarantine_rows.csv)</summary>
+            <table>
+              <thead><tr><th>enquiry_id</th><th>account_key</th><th>t0_time</th><th>product_family</th><th>quarantine_reason</th></tr></thead>
+              <tbody id="pipe-quarantine-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 2: PLPT-15 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 2 — PLPT-15 (US-07): Gộp trùng đa kênh &amp; Hàng đợi Data Steward (CF-09)</h4>
+          <div class="kpi-row">
+            <span id="pipe-dedup-summary" class="kpi-pill">raw=0 | clean=0 | merged=0</span>
+            <span id="pipe-dedup-math" class="badge badge-info">Đối soát raw - clean == merged</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-pipe-dedup" type="button" class="btn-primary">2.1 Chạy Deduplicator (gộp trùng đa kênh)</button>
+            <button id="btn-test-plpt15" type="button" class="btn-secondary dev-only-btn">[DEV] 2.2 Chạy pytest Dedup &amp; CF-09</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem bảng merge_audit_log (15 bản ghi mới nhất)</summary>
+            <table>
+              <thead><tr><th>canonical_enquiry_id</th><th>merged_enquiry_id</th><th>account_key</th><th>product_family</th><th>canonical_t0_time</th><th>merge_reason</th></tr></thead>
+              <tbody id="pipe-merge-body"></tbody>
+            </table>
+          </details>
+          <details class="pipe-details">
+            <summary>Xem bảng steward_review_queue (CF-09)</summary>
+            <table>
+              <thead><tr><th>enquiry_id_a</th><th>enquiry_id_b</th><th>account_key</th><th>product_family</th><th>conflict_reason</th><th>status</th></tr></thead>
+              <tbody id="pipe-steward-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 3: PLPT-16 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 3 — PLPT-16 (US-08): Rules Baseline 100 điểm &amp; Kiểm tra JSON GET /api/queue</h4>
+          <div class="kpi-row">
+            <span id="pipe-queue-checks" class="badge badge-info">Bấm nút kiểm tra để xác minh JSON /api/queue</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-pipe-inspect-queue" type="button" class="btn-primary">3.3 Kiểm tra thực tế GET /api/queue (Top 5 JSON)</button>
+            <button id="btn-test-plpt16" type="button" class="btn-secondary dev-only-btn">[DEV] 3.1 Chạy pytest test_rules_engine</button>
+          </div>
+        </div>
+
+        <!-- Bước 4: PLPT-17 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 4 — PLPT-17 (US-09): Chặn khẩn cấp, RBAC 403 &amp; Khóa dữ liệu cũ &gt; 24h (HOLD_STALE_DATA)</h4>
+          <div class="kpi-row">
+            <span id="pipe-freshness-badge" class="badge badge-info">Đang kiểm tra độ tươi dữ liệu...</span>
+          </div>
+          <div class="btn-row">
+            <button id="btn-pipe-test-block-rbac" type="button" class="btn-secondary">4.2 Thử POST /api/block bằng phiên hiện tại</button>
+            <button id="btn-pipe-sim-stale" type="button" class="btn-danger dev-only-btn">[DEV] 4.4 Giả lập dữ liệu cũ &gt; 24h (HOLD_STALE_DATA)</button>
+            <button id="btn-pipe-restore-fresh" type="button" class="btn-primary dev-only-btn">[DEV] 4.4 Khôi phục dữ liệu tươi (&lt; 24h)</button>
+            <button id="btn-test-plpt17" type="button" class="btn-secondary dev-only-btn">[DEV] 4.1 Chạy pytest test_plpt17_blocking</button>
+          </div>
+          <details class="pipe-details">
+            <summary>Xem bảng blocked_accounts (thay thế SQLite Viewer)</summary>
+            <table>
+              <thead><tr><th>enquiry_id</th><th>account_key</th><th>reason</th><th>blocked_at</th><th>created_by</th></tr></thead>
+              <tbody id="pipe-blocked-body"></tbody>
+            </table>
+          </details>
+        </div>
+
+        <!-- Bước 5: DoD Sprint 2 -->
+        <div class="card">
+          <h4 class="pipeline-step-title">Bước 5 — DoD chung Sprint 2 &amp; Quét bảo mật Git (DEV ONLY)</h4>
+          <div class="btn-row">
+            <button id="btn-test-sprint2-all" type="button" class="btn-primary dev-only-btn">[DEV] 5.1 Chạy toàn bộ pytest Sprint 2 (core_pipeline + CF-09)</button>
+            <button id="btn-test-git-sec" type="button" class="btn-secondary dev-only-btn">[DEV] 5.2 Quét bảo mật Git (gitleaks + chặn .env)</button>
+          </div>
+        </div>
+
+        <!-- Hộp xem kết quả chi tiết / JSON / Pytest Output -->
+        <div class="card">
+          <div class="pipeline-header">
+            <strong>Kết quả kiểm tra chi tiết (JSON / Audit / Pytest)</strong>
+            <span id="pipeline-console-title" class="badge badge-info">Sẵn sàng</span>
+          </div>
+          <pre id="pipeline-console-output" class="console-pre">Chọn một thao tác ở trên để xem kết quả chi tiết ngay trên trình duyệt.</pre>
+        </div>
+      </div>
+
       <div class="card" id="queue-card">
         <table>
           <thead>
@@ -159,6 +286,7 @@
   </div>
 
   <script src="./app.js" defer></script>
+  <script src="./pipeline.js" defer></script>
 </body>
 </html>
 

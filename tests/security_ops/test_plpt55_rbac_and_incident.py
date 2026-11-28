@@ -14,6 +14,10 @@ from src.security.auth import (
     get_session_secret_key,
     get_session_ttl_minutes,
     resolve_auth_context,
+    resolve_login_identity,
+    sign_session_token,
+    verify_signed_session_token,
+    upsert_internal_account,
 )
 from src.security.incident_hold import (
     HOLD_STALE_DATA,
@@ -61,7 +65,7 @@ def test_plpt55_five_role_rbac_matrix_and_session_limits():
     ctx = resolve_auth_context(
         authorization=f"Bearer {sessions[0].session_id}",
         session_store=store,
-        now=base_now + timedelta(hours=1),
+        now=base_now + timedelta(minutes=30),
     )
     assert ctx is not None and ctx.user_id == "sales_0" and ctx.role == "SALES_READER"
 
@@ -136,6 +140,155 @@ def test_plpt55_env_separation_and_secret_management(monkeypatch):
 
     monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
     assert len(get_session_secret_key()) == 40
+
+
+def test_plpt59_login_identity_contract(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "login_contract.db"
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_directory",
+        role="SALES_READER",
+        team_id="TEAM-A",
+        assigned_accounts=["ACCT-A"],
+        status="ACTIVE",
+    )
+    upsert_internal_account(
+        db_path,
+        user_id="revoked_user",
+        role="SUPERVISOR",
+        status="REVOKED",
+    )
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.delenv("REQUIRE_ACCOUNT_DIRECTORY", raising=False)
+
+    role, team_id, accounts = resolve_login_identity(
+        db_path,
+        user_id="sales_directory",
+        requested_role="SALES_READER",
+    )
+    assert (role, team_id, accounts) == ("SALES_READER", "TEAM-A", ("ACCT-A",))
+
+    with pytest.raises(HTTPException) as exc_mismatch:
+        resolve_login_identity(
+            db_path,
+            user_id="sales_directory",
+            requested_role="ADMINISTRATOR",
+        )
+    assert exc_mismatch.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_revoked:
+        resolve_login_identity(
+            db_path,
+            user_id="revoked_user",
+            requested_role="SUPERVISOR",
+        )
+    assert exc_revoked.value.status_code == 403
+
+    role, team_id, accounts = resolve_login_identity(
+        db_path,
+        user_id="dev_only",
+        requested_role="DATA_STEWARD",
+    )
+    assert (role, team_id, accounts) == ("DATA_STEWARD", None, ())
+
+    with pytest.raises(HTTPException) as exc_missing_role:
+        resolve_login_identity(db_path, user_id="dev_only")
+    assert exc_missing_role.value.status_code == 400
+
+    with pytest.raises(HTTPException) as exc_invalid_role:
+        resolve_login_identity(
+            db_path,
+            user_id="dev_only",
+            requested_role="OWNER",
+        )
+    assert exc_invalid_role.value.status_code == 403
+
+    monkeypatch.setenv("ENV_MODE", "production")
+    with pytest.raises(HTTPException) as exc_unknown:
+        resolve_login_identity(
+            db_path,
+            user_id="unknown_production",
+            requested_role="ADMINISTRATOR",
+        )
+    assert exc_unknown.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_missing_user:
+        resolve_login_identity(db_path, user_id="")
+    assert exc_missing_user.value.status_code == 400
+
+
+def test_plpt59_session_policy_and_account_revoke(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "session_policy.db"
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.setenv("SESSION_TTL_MINUTES", "60")
+
+    assert get_session_ttl_minutes() == 60
+    monkeypatch.setenv("SESSION_TTL_MINUTES", "999999")
+    assert get_session_ttl_minutes() == 60
+
+    store = SessionStore(max_concurrent_sessions=5)
+    now = datetime(2026, 11, 28, 10, 0, tzinfo=VN_TZ)
+    record = store.create_session(
+        "sales_59",
+        "SALES_READER",
+        ttl_minutes=60,
+        now=now,
+    )
+    assert record.expires_at == now + timedelta(minutes=60)
+
+    with pytest.raises(HTTPException) as exc_ttl:
+        store.create_session("sales_over_ttl", "SALES_READER", ttl_minutes=481, now=now)
+    assert exc_ttl.value.status_code == 400
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_59",
+        role="SALES_READER",
+        team_id="TEAM-A",
+        assigned_accounts=["ACCT-A"],
+        status="ACTIVE",
+    )
+    token = sign_session_token(
+        record.session_id,
+        record.user_id,
+        record.role,
+        record.issued_at,
+        record.expires_at,
+        team_id=record.team_id,
+        assigned_accounts=record.assigned_accounts,
+    )
+    ctx = verify_signed_session_token(token, db_path=db_path, now=now)
+    assert ctx.team_id == "TEAM-A"
+    assert ctx.assigned_accounts == ("ACCT-A",)
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_59",
+        role="SALES_READER",
+        status="REVOKED",
+        created_by="ADMINISTRATOR",
+    )
+    store.revoke_sessions_for_user("sales_59", db_path=db_path)
+    with pytest.raises(HTTPException) as exc_revoked_account:
+        verify_signed_session_token(token, db_path=db_path, now=now)
+    assert exc_revoked_account.value.status_code == 401
+    assert store.active_session_count(now=now) == 0
+
+
+def test_plpt59_production_rejects_role_header(monkeypatch):
+    monkeypatch.setenv("ENV_MODE", "production")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "true")
+
+    with pytest.raises(HTTPException) as exc_header:
+        resolve_auth_context(
+            x_user_role="ADMINISTRATOR",
+            require_auth=True,
+            db_path=None,
+        )
+    assert exc_header.value.status_code == 401
 
 
 

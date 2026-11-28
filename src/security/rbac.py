@@ -87,6 +87,10 @@ def require_roles(
         authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> AuthContext | None:
         enforce = enforce_flag_fn()
+        from src.security.auth import get_env_mode
+
+        if get_env_mode() == "production":
+            enforce = True
         has_any_header = any([x_user_role, x_session_expired, authorization])
         if not enforce and not has_any_header:
             return None

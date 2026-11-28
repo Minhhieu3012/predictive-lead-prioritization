@@ -41,6 +41,7 @@ from src.security.auth import (
     get_internal_account,
     list_internal_accounts,
     record_security_audit_log,
+    resolve_login_identity,
     upsert_internal_account,
 )
 from src.security.incident_hold import (
@@ -507,27 +508,24 @@ def post_workspace_override(
 @app.post("/api/v1/auth/login")
 def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """PLPT-59 / PLPT-60 / Quyết định PO #1 & #2: Xác thực qua danh bạ nội bộ và cấp token HMAC-SHA256."""
-    import os as _os
     db_path = get_db_path()
     user_id = str(payload.get("user_id") or "").strip()
     role = str(payload.get("role") or "").strip().upper()
-    team_id = str(payload.get("team_id") or "").strip() or None
-    assigned_accounts = [str(a).strip() for a in (payload.get("assigned_accounts") or []) if str(a).strip()]
-
-    acct = get_internal_account(db_path, user_id) if user_id else None
-    if acct is not None:
-        if acct["status"] != "ACTIVE":
-            raise HTTPException(status_code=403, detail="Tài khoản nội bộ đã bị thu hồi hoặc khóa.")
-        if role and role != acct["role"]:
-            raise HTTPException(status_code=403, detail="Vai trò yêu cầu không khớp danh bạ nội bộ.")
-        role = acct["role"]
-        team_id = acct["team_id"]
-        assigned_accounts = acct["assigned_accounts"]
-    elif _os.getenv("REQUIRE_ACCOUNT_DIRECTORY", "false").strip().lower() in {"1", "true", "yes"} or get_env_mode() == "production":
-        raise HTTPException(status_code=401, detail="Tài khoản chưa được ADMINISTRATOR cấp trong danh bạ nội bộ.")
+    role, team_id, assigned_accounts = resolve_login_identity(
+        db_path,
+        user_id=user_id,
+        requested_role=role,
+    )
 
     ttl_raw = payload.get("ttl_minutes")
-    ttl_minutes = int(ttl_raw) if ttl_raw is not None else None
+    ttl_minutes: int | None = None
+    if ttl_raw is not None:
+        try:
+            ttl_minutes = int(ttl_raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="ttl_minutes phải là số nguyên dương.") from exc
+        if get_env_mode() == "production":
+            raise HTTPException(status_code=400, detail="Production không cho phép ghi đè TTL phiên.")
 
     record, token = DEFAULT_SESSION_STORE.issue_signed_session(
         user_id=user_id,

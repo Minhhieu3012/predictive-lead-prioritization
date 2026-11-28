@@ -21,7 +21,8 @@ DEFAULT_PLACEHOLDER_SECRET = "CHANGE_ME_LOCAL_DEV_PLACEHOLDER_ONLY"
 MAX_CONCURRENT_SESSIONS = 5
 MAX_INTERNAL_USERS = 20
 GLOBAL_SCOPE_ROLES = {"ADMINISTRATOR", "DATA_STEWARD", "MODEL_REVIEWER"}
-DEFAULT_SESSION_TTL_MINUTES = 480
+DEFAULT_SESSION_TTL_MINUTES = 60
+MAX_SESSION_TTL_MINUTES = 480
 
 VALID_ROLES = {
     "SALES_READER",
@@ -44,7 +45,11 @@ def get_session_ttl_minutes() -> int:
     raw = os.getenv("SESSION_TTL_MINUTES", str(DEFAULT_SESSION_TTL_MINUTES)).strip()
     try:
         val = int(raw)
-        return val if val > 0 else DEFAULT_SESSION_TTL_MINUTES
+        if val <= 0:
+            return DEFAULT_SESSION_TTL_MINUTES
+        if val > MAX_SESSION_TTL_MINUTES:
+            return DEFAULT_SESSION_TTL_MINUTES
+        return val
     except ValueError:
         return DEFAULT_SESSION_TTL_MINUTES
 
@@ -257,6 +262,15 @@ def verify_signed_session_token(
 
     team_id = str(payload.get("team_id") or "").strip() or None
     accts = tuple(str(a).strip() for a in (payload.get("accounts") or []) if str(a).strip())
+    if db_path is not None:
+        account = get_internal_account(db_path, uid)
+        if account is not None:
+            if account["status"] != "ACTIVE":
+                raise HTTPException(status_code=403, detail="Tài khoản nội bộ đã bị thu hồi hoặc khóa.")
+            if str(account["role"]).strip().upper() != role:
+                raise HTTPException(status_code=403, detail="Vai trò phiên không khớp danh bạ nội bộ.")
+            team_id = account["team_id"]
+            accts = tuple(str(a).strip() for a in account["assigned_accounts"] if str(a).strip())
     return AuthContext(user_id=uid, role=role, session_id=sid, team_id=team_id, assigned_accounts=accts)
 
 
@@ -313,6 +327,13 @@ class SessionStore:
         now: datetime | None = None,
     ) -> SessionRecord:
         effective_ttl = ttl_minutes if ttl_minutes is not None else get_session_ttl_minutes()
+        if effective_ttl <= 0:
+            raise HTTPException(status_code=400, detail="SESSION_TTL_MINUTES phải là số nguyên dương.")
+        if effective_ttl > MAX_SESSION_TTL_MINUTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"TTL phiên không được vượt quá {MAX_SESSION_TTL_MINUTES} phút.",
+            )
         norm_role = str(role or "").strip().upper()
         if norm_role not in VALID_ROLES:
             raise HTTPException(status_code=403, detail=f"Vai trò không hợp lệ: {norm_role}")
@@ -424,6 +445,26 @@ class SessionStore:
         self._sessions.pop(session_id, None)
         return True
 
+    def revoke_sessions_for_user(
+        self,
+        user_id: str,
+        *,
+        db_path: str | Path | None = None,
+        reason: str = "ACCOUNT_REVOKED",
+    ) -> int:
+        norm_user = str(user_id or "").strip()
+        revoked_count = 0
+        for session_id, record in list(self._sessions.items()):
+            if record.user_id == norm_user:
+                self.revoke_session(
+                    session_id,
+                    db_path=db_path,
+                    user_id=norm_user,
+                    reason=reason,
+                )
+                revoked_count += 1
+        return revoked_count
+
     def active_session_count(self, *, now: datetime | None = None) -> int:
         current = now or datetime.now(VN_TZ)
         self._prune_expired(current)
@@ -457,6 +498,11 @@ def resolve_auth_context(
         if token.lower() in {"expired", "invalid", "stale"}:
             raise HTTPException(status_code=401, detail="Token phiên không hợp lệ hoặc đã hết hạn.")
         if is_legacy_role_header_allowed():
+            if get_env_mode() == "production":
+                raise HTTPException(
+                    status_code=401,
+                    detail="Môi trường production yêu cầu token phiên HMAC-SHA256.",
+                )
             legacy_role = ""
             if token.upper().startswith("ROLE:"):
                 legacy_role = token[5:].strip().upper()
@@ -470,6 +516,11 @@ def resolve_auth_context(
 
     role = (x_user_role or "").strip().upper()
     if role:
+        if get_env_mode() == "production":
+            raise HTTPException(
+                status_code=401,
+                detail="Môi trường production không chấp nhận header vai trò thô.",
+            )
         if not is_legacy_role_header_allowed():
             raise HTTPException(
                 status_code=401,
@@ -486,6 +537,52 @@ def resolve_auth_context(
             detail="Thiếu thông tin xác thực phiên (Authorization: Bearer <token>).",
         )
     return None
+
+
+def resolve_login_identity(
+    db_path: str | Path,
+    *,
+    user_id: str,
+    requested_role: str = "",
+) -> tuple[str, str | None, tuple[str, ...]]:
+    """
+    Resolve the authentication contract for a login request.
+
+    Internal accounts are authoritative: if present, role, team, and assigned
+    accounts come from the account directory and caller-supplied scope is ignored.
+    Unknown accounts are allowed only in development/evaluation fallback mode,
+    require an explicit approved role, and receive no team/account scope.
+    """
+    norm_user = str(user_id or "").strip()
+    if not norm_user:
+        raise HTTPException(status_code=400, detail="Thiếu mã người dùng (user_id).")
+
+    norm_role = str(requested_role or "").strip().upper()
+    account = get_internal_account(db_path, norm_user)
+
+    if account is not None:
+        if account["status"] != "ACTIVE":
+            raise HTTPException(status_code=403, detail="Tài khoản nội bộ đã bị thu hồi hoặc khóa.")
+        directory_role = str(account["role"]).strip().upper()
+        if norm_role and norm_role != directory_role:
+            raise HTTPException(status_code=403, detail="Vai trò yêu cầu không khớp danh bạ nội bộ.")
+        team_id = account["team_id"]
+        assigned_accounts = tuple(str(account_key).strip() for account_key in account["assigned_accounts"] if str(account_key).strip())
+        return directory_role, team_id, assigned_accounts
+
+    require_directory = (
+        get_env_mode() == "production"
+        or os.getenv("REQUIRE_ACCOUNT_DIRECTORY", "false").strip().lower() in {"1", "true", "yes"}
+    )
+    if require_directory:
+        raise HTTPException(status_code=401, detail="Tài khoản chưa được ADMINISTRATOR cấp trong danh bạ nội bộ.")
+
+    if not norm_role:
+        raise HTTPException(status_code=400, detail="Thiếu vai trò đã được chấp thuận (role).")
+    if norm_role not in VALID_ROLES:
+        raise HTTPException(status_code=403, detail=f"Vai trò không hợp lệ: {norm_role}")
+
+    return norm_role, None, ()
 
 
 def upsert_internal_account(
@@ -542,6 +639,12 @@ def upsert_internal_account(
                 (norm_user, norm_role, norm_team, json.dumps(norm_accts, ensure_ascii=False), norm_status, created_by, created_at, ts),
             )
             conn.commit()
+    if norm_status == "REVOKED":
+        DEFAULT_SESSION_STORE.revoke_sessions_for_user(
+            norm_user,
+            db_path=p,
+            reason="ACCOUNT_REVOKED",
+        )
     return {
         "user_id": norm_user,
         "role": norm_role,

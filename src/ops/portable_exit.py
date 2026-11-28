@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.security.incident_hold import require_no_active_incident_hold
+
 VN_TZ = timezone(timedelta(hours=7))
 
 EXPORTABLE_TABLES = (
@@ -36,6 +38,7 @@ def export_portable_exit_bundle(
     src_db = Path(db_path)
     if not src_db.exists():
         raise FileNotFoundError(f"Database not found: {src_db}")
+    require_no_active_incident_hold(src_db)
 
     out_dir = Path(export_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

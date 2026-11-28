@@ -5,6 +5,7 @@ Tuyệt đối KHÔNG dùng thay thế dữ liệu lịch sử thật của Song
 """
 
 import random
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pandas as pd
@@ -195,7 +196,14 @@ def main():
         enq_rows.append(e)
         out_rows.append(o)
 
-    raw_dir = PROJECT_ROOT / "data" / "raw"
+    env_mode = os.getenv("ENV_MODE", "development").strip().lower()
+    if env_mode not in {"development", "evaluation"}:
+        raise RuntimeError("Synthetic data generation is prohibited outside development/evaluation.")
+    raw_dir = (
+        PROJECT_ROOT / "data" / "evaluation" / "raw"
+        if env_mode == "evaluation"
+        else PROJECT_ROOT / "data" / "raw"
+    )
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     enq_path = raw_dir / "enquiries_snapshot.csv"

@@ -15,6 +15,7 @@ import pandas as pd
 from scripts.dev import generate_synthetic_data
 from src.ingest import csv_validator, deduplicator
 from src.security.auth import AuthContext, get_env_mode, record_security_audit_log
+from src.security.incident_hold import require_no_active_incident_hold
 from src.security.rbac import is_rbac_enforced_on_v1, require_roles
 from src.services.queue_service import (
     STALE_HOLD_HOURS,
@@ -470,6 +471,10 @@ def trigger_pipeline_ingest(
 ) -> dict[str, Any]:
     """PLPT-14 (US-06): Nạp 2 file CSV chuẩn UTF-8 vào SQLite, tách Quarantine, lọc 3 cột *_DO_NOT_USE (Idempotent)."""
     db_path = get_db_path()
+    try:
+        require_no_active_incident_hold(db_path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     before_enq = 0
     before_out = 0
     if db_path.exists():
@@ -529,6 +534,10 @@ def trigger_pipeline_deduplicate(
 ) -> dict[str, Any]:
     """PLPT-15 (US-07): Chạy gộp trùng đa kênh -> clean_enquiries, merge_audit_log & steward_review_queue."""
     db_path = get_db_path()
+    try:
+        require_no_active_incident_hold(db_path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not db_path.exists():
         raise HTTPException(status_code=400, detail="Chưa có cơ sở dữ liệu; hãy chạy Nạp CSV trước.")
     summary = deduplicator.deduplicate_enquiries(db_path=db_path)

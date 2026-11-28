@@ -88,7 +88,7 @@ def test_sprint4_browser_console_end_to_end_and_security_guards(tmp_path: Path, 
     r_ready = client.get("/api/v1/admin/security-readiness", headers=admin_hdr)
     assert r_ready.status_code == 200
     assert len(r_ready.json()["vn_legal_compliance"]["instruments"]) == 6
-    assert r_ready.json()["sales_training_status"]["status"] == "COMPLETED_PILOT_BRIEFING"
+    assert r_ready.json()["sales_training_status"]["status"] == "PENDING_EXTERNAL_TRAINING_SIGNOFF"
 
     # 4) Bước 2.2 (PLPT-56): Shadow Summary & Fallback
     r_sh = client.get("/api/v1/shadow/summary", headers=admin_hdr)

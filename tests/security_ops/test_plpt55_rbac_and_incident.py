@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 import pytest
+import sqlite3
 
 from src.security.auth import (
     DEFAULT_PLACEHOLDER_SECRET,
@@ -14,6 +15,10 @@ from src.security.auth import (
     get_session_secret_key,
     get_session_ttl_minutes,
     resolve_auth_context,
+    resolve_login_identity,
+    sign_session_token,
+    verify_signed_session_token,
+    upsert_internal_account,
 )
 from src.security.incident_hold import (
     HOLD_STALE_DATA,
@@ -24,6 +29,11 @@ from src.security.incident_hold import (
     release_emergency_hold,
 )
 from src.security.rbac import ROLE_PERMISSIONS, VALID_ROLES, has_permission
+from src.config.environment import (
+    get_database_path,
+    get_quarantine_dir,
+    validate_environment_paths,
+)
 
 VN_TZ = timezone(timedelta(hours=7))
 
@@ -61,7 +71,7 @@ def test_plpt55_five_role_rbac_matrix_and_session_limits():
     ctx = resolve_auth_context(
         authorization=f"Bearer {sessions[0].session_id}",
         session_store=store,
-        now=base_now + timedelta(hours=1),
+        now=base_now + timedelta(minutes=30),
     )
     assert ctx is not None and ctx.user_id == "sales_0" and ctx.role == "SALES_READER"
 
@@ -91,7 +101,21 @@ def test_sec08_four_hour_incident_hold_and_local_block(tmp_path: Path):
         now=t0,
     )
     assert hold["hold_code"] == HOLD_STALE_DATA
+    assert hold["snapshot_id"]
+    assert hold["snapshot_audit_count"] >= 0
+    assert hold["snapshot_audit_hash"]
+    assert hold["notification_draft"]
     assert get_active_incident_hold(db_path) is not None
+
+    repeated = activate_emergency_hold(
+        db_path,
+        reason="Repeated activation should not create duplicate",
+        triggered_by="admin_01",
+        severity="CRITICAL",
+        now=t0 + timedelta(minutes=5),
+    )
+    assert repeated["repeated_activation"] is True
+    assert repeated["incident_id"] == hold["incident_id"]
 
     notif = record_purchaser_notification(
         db_path,
@@ -120,6 +144,38 @@ def test_sec08_four_hour_incident_hold_and_local_block(tmp_path: Path):
     assert blk["blocked"] is True
 
 
+def test_plpt61_environment_isolation(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+    monkeypatch.delenv("QUARANTINE_DIR", raising=False)
+
+    monkeypatch.setenv("ENV_MODE", "development")
+    assert "production" not in str(get_database_path()).lower()
+    assert "production" not in str(get_quarantine_dir()).lower()
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    assert "evaluation" in str(get_database_path()).lower()
+    assert "evaluation" in str(get_quarantine_dir()).lower()
+
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "production" / "must-not-cross.db"))
+    with pytest.raises(RuntimeError, match="không được trỏ"):
+        validate_environment_paths()
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+
+    monkeypatch.setenv("ENV_MODE", "production")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
+    production_config = validate_environment_paths()
+    assert production_config["env_mode"] == "production"
+    assert "production" in production_config["database_path"].lower()
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "evaluation.db"))
+    assert validate_environment_paths()["database_path"].endswith("evaluation.db")
+
+    monkeypatch.setenv("ENV_MODE", "invalid")
+    with pytest.raises(ValueError, match="ENV_MODE"):
+        get_database_path()
+
+
 def test_plpt55_env_separation_and_secret_management(monkeypatch):
     monkeypatch.setenv("ENV_MODE", "evaluation")
     monkeypatch.setenv("SESSION_TTL_MINUTES", "120")
@@ -137,6 +193,177 @@ def test_plpt55_env_separation_and_secret_management(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
     assert len(get_session_secret_key()) == 40
 
+
+def test_plpt59_login_identity_contract(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "login_contract.db"
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_directory",
+        role="SALES_READER",
+        team_id="TEAM-A",
+        assigned_accounts=["ACCT-A"],
+        status="ACTIVE",
+    )
+    upsert_internal_account(
+        db_path,
+        user_id="revoked_user",
+        role="SUPERVISOR",
+        status="REVOKED",
+    )
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.delenv("REQUIRE_ACCOUNT_DIRECTORY", raising=False)
+
+    role, team_id, accounts = resolve_login_identity(
+        db_path,
+        user_id="sales_directory",
+        requested_role="SALES_READER",
+    )
+    assert (role, team_id, accounts) == ("SALES_READER", "TEAM-A", ("ACCT-A",))
+
+    with pytest.raises(HTTPException) as exc_mismatch:
+        resolve_login_identity(
+            db_path,
+            user_id="sales_directory",
+            requested_role="ADMINISTRATOR",
+        )
+    assert exc_mismatch.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_revoked:
+        resolve_login_identity(
+            db_path,
+            user_id="revoked_user",
+            requested_role="SUPERVISOR",
+        )
+    assert exc_revoked.value.status_code == 403
+
+    role, team_id, accounts = resolve_login_identity(
+        db_path,
+        user_id="dev_only",
+        requested_role="DATA_STEWARD",
+    )
+    assert (role, team_id, accounts) == ("DATA_STEWARD", None, ())
+
+    with pytest.raises(HTTPException) as exc_missing_role:
+        resolve_login_identity(db_path, user_id="dev_only")
+    assert exc_missing_role.value.status_code == 400
+
+    with pytest.raises(HTTPException) as exc_invalid_role:
+        resolve_login_identity(
+            db_path,
+            user_id="dev_only",
+            requested_role="OWNER",
+        )
+    assert exc_invalid_role.value.status_code == 403
+
+    monkeypatch.setenv("ENV_MODE", "production")
+    with pytest.raises(HTTPException) as exc_unknown:
+        resolve_login_identity(
+            db_path,
+            user_id="unknown_production",
+            requested_role="ADMINISTRATOR",
+        )
+    assert exc_unknown.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_missing_user:
+        resolve_login_identity(db_path, user_id="")
+    assert exc_missing_user.value.status_code == 400
+
+
+def test_plpt59_session_policy_and_account_revoke(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "session_policy.db"
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.setenv("SESSION_TTL_MINUTES", "60")
+
+    assert get_session_ttl_minutes() == 60
+    monkeypatch.setenv("SESSION_TTL_MINUTES", "999999")
+    assert get_session_ttl_minutes() == 60
+
+    store = SessionStore(max_concurrent_sessions=5)
+    now = datetime(2026, 11, 28, 10, 0, tzinfo=VN_TZ)
+    record = store.create_session(
+        "sales_59",
+        "SALES_READER",
+        ttl_minutes=60,
+        now=now,
+    )
+    assert record.expires_at == now + timedelta(minutes=60)
+
+    with pytest.raises(HTTPException) as exc_ttl:
+        store.create_session("sales_over_ttl", "SALES_READER", ttl_minutes=481, now=now)
+    assert exc_ttl.value.status_code == 400
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_59",
+        role="SALES_READER",
+        team_id="TEAM-A",
+        assigned_accounts=["ACCT-A"],
+        status="ACTIVE",
+    )
+    token = sign_session_token(
+        record.session_id,
+        record.user_id,
+        record.role,
+        record.issued_at,
+        record.expires_at,
+        team_id=record.team_id,
+        assigned_accounts=record.assigned_accounts,
+    )
+    ctx = verify_signed_session_token(token, db_path=db_path, now=now)
+    assert ctx.team_id == "TEAM-A"
+    assert ctx.assigned_accounts == ("ACCT-A",)
+
+    upsert_internal_account(
+        db_path,
+        user_id="sales_59",
+        role="SALES_READER",
+        status="REVOKED",
+        created_by="ADMINISTRATOR",
+    )
+    store.revoke_sessions_for_user("sales_59", db_path=db_path)
+    with pytest.raises(HTTPException) as exc_revoked_account:
+        verify_signed_session_token(token, db_path=db_path, now=now)
+    assert exc_revoked_account.value.status_code == 401
+    assert store.active_session_count(now=now) == 0
+
+
+def test_plpt59_production_rejects_role_header(monkeypatch):
+    monkeypatch.setenv("ENV_MODE", "production")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
+    monkeypatch.setenv("ALLOW_LEGACY_ROLE_HEADER", "true")
+
+    with pytest.raises(HTTPException) as exc_header:
+        resolve_auth_context(
+            x_user_role="ADMINISTRATOR",
+            require_auth=True,
+            db_path=None,
+        )
+    assert exc_header.value.status_code == 401
+
+
+
+def test_plpt60_ops_exports_and_backup_are_blocked_by_hold(tmp_path: Path):
+    from src.ops.backup_restore import create_sqlite_backup
+    from src.ops.portable_exit import export_portable_exit_bundle
+
+    db_path = tmp_path / "hold.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE TABLE clean_enquiries (enquiry_id TEXT)")
+        conn.execute("INSERT INTO clean_enquiries VALUES ('E-1')")
+
+    activate_emergency_hold(
+        db_path,
+        reason="Incident hold blocks exports",
+        triggered_by="admin_01",
+        severity="CRITICAL",
+    )
+
+    with pytest.raises(RuntimeError, match="khóa khẩn cấp"):
+        create_sqlite_backup(db_path, tmp_path / "backups")
+    with pytest.raises(RuntimeError, match="khóa khẩn cấp"):
+        export_portable_exit_bundle(db_path, tmp_path / "exports")
 
 
 def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monkeypatch):
@@ -174,6 +401,20 @@ def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monke
     assert r_acc.status_code == 200
     sales_tok = client.post("/auth/login", json={"user_id": "sales_a"}).json()["token"]
 
+    r_sup = client.post(
+        "/admin/accounts",
+        json={"user_id": "sup_01", "role": "SUPERVISOR", "team_id": "TEAM-A", "assigned_accounts": ["ACCT-A"]},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    )
+    assert r_sup.status_code == 200
+    sup_tok = client.post("/auth/login", json={"user_id": "sup_01"}).json()["token"]
+    denied_hold = client.post(
+        "/admin/incident-hold",
+        json={"action": "activate", "reason": "Supervisor must not activate"},
+        headers={"Authorization": f"Bearer {sup_tok}"},
+    )
+    assert denied_hold.status_code == 403
+
     # Lọc đúng ACCT-A và chặn IDOR sang E-B1 (403)
     q_sales = client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()
     assert q_sales["total"] == 1 and q_sales["items"][0]["account_key"] == "ACCT-A"
@@ -193,6 +434,13 @@ def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monke
         json={"action": "activate", "reason": "PLPT-62 test", "severity": "CRITICAL"},
         headers={"Authorization": f"Bearer {admin_tok}"},
     ).json()
+    repeated_hold = client.post(
+        "/admin/incident-hold",
+        json={"action": "activate", "reason": "Repeated activation", "severity": "CRITICAL"},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    ).json()
+    assert repeated_hold["repeated_activation"] is True
+    assert repeated_hold["incident_id"] == hold["incident_id"]
     assert client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()["locked"] is True
     assert client.post(
         "/admin/incident-hold",

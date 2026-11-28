@@ -1,17 +1,43 @@
 import contextlib
+import os
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import pandas as pd
 
+from src.config.environment import get_env_mode
+
 VN_TZ = timezone(timedelta(hours=7))
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-ENQUIRIES_PATH = PROJECT_ROOT / "data" / "raw" / "enquiries_snapshot.csv"
-OUTCOMES_PATH = PROJECT_ROOT / "data" / "raw" / "outcome_events.csv"
-QUARANTINE_PATH = PROJECT_ROOT / "data" / "quarantine" / "quarantine_rows.csv"
-QUARANTINE_OUTCOMES_PATH = PROJECT_ROOT / "data" / "quarantine" / "quarantine_outcomes.csv"
-DB_PATH = PROJECT_ROOT / "data" / "songnhat.db"
+_env_mode = get_env_mode()
+if _env_mode == "evaluation":
+    _raw_dir = PROJECT_ROOT / "data" / "evaluation" / "raw"
+elif _env_mode == "production":
+    _raw_dir = PROJECT_ROOT / "data" / "production" / "raw"
+else:
+    _raw_dir = PROJECT_ROOT / "data" / "raw"
+_quarantine_dir = (
+    PROJECT_ROOT / "data" / "evaluation" / "quarantine"
+    if _env_mode == "evaluation"
+    else PROJECT_ROOT / "data" / "quarantine"
+)
+ENQUIRIES_PATH = Path(
+    os.getenv("ENQUIRIES_CSV_PATH", str(_raw_dir / "enquiries_snapshot.csv"))
+)
+OUTCOMES_PATH = Path(
+    os.getenv("OUTCOMES_CSV_PATH", str(_raw_dir / "outcome_events.csv"))
+)
+QUARANTINE_PATH = Path(
+    os.getenv("QUARANTINE_ROWS_PATH", str(_quarantine_dir / "quarantine_rows.csv"))
+)
+QUARANTINE_OUTCOMES_PATH = Path(
+    os.getenv(
+        "QUARANTINE_OUTCOMES_PATH",
+        str(_quarantine_dir / "quarantine_outcomes.csv"),
+    )
+)
+DB_PATH = Path(os.getenv("DATABASE_PATH", str(PROJECT_ROOT / "data" / "songnhat.db")))
 
 REQUIRED_ENQ_COLS = [
     "enquiry_id", "account_key", "t0_time", "extraction_time", "product_family"

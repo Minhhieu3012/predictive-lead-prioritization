@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import contextlib
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -41,6 +42,7 @@ from src.security.auth import (
     get_internal_account,
     list_internal_accounts,
     record_security_audit_log,
+    resolve_login_identity,
     upsert_internal_account,
 )
 from src.security.incident_hold import (
@@ -62,12 +64,43 @@ app = FastAPI(
     version="1.2.0",
 )
 
+
+@app.on_event("startup")
+def validate_environment_on_startup() -> None:
+    from src.config.environment import validate_environment_paths
+
+    validate_environment_paths()
+
+
+def _get_cors_origins() -> list[str]:
+    configured = str(os.getenv("CORS_ALLOWED_ORIGINS", "")).strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if get_env_mode() == "production":
+        return []
+    return ["http://localhost", "http://127.0.0.1"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def audit_denied_requests(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code in {401, 403}:
+        record_security_audit_log(
+            get_db_path(),
+            event_type="AUTH_DENIED" if response.status_code == 401 else "AUTH_FORBIDDEN",
+            endpoint=str(request.url.path),
+            status_code=response.status_code,
+            detail=f"{request.method} direct/API access denied",
+        )
+    return response
 
 
 @app.middleware("http")
@@ -507,27 +540,24 @@ def post_workspace_override(
 @app.post("/api/v1/auth/login")
 def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """PLPT-59 / PLPT-60 / Quyết định PO #1 & #2: Xác thực qua danh bạ nội bộ và cấp token HMAC-SHA256."""
-    import os as _os
     db_path = get_db_path()
     user_id = str(payload.get("user_id") or "").strip()
     role = str(payload.get("role") or "").strip().upper()
-    team_id = str(payload.get("team_id") or "").strip() or None
-    assigned_accounts = [str(a).strip() for a in (payload.get("assigned_accounts") or []) if str(a).strip()]
-
-    acct = get_internal_account(db_path, user_id) if user_id else None
-    if acct is not None:
-        if acct["status"] != "ACTIVE":
-            raise HTTPException(status_code=403, detail="Tài khoản nội bộ đã bị thu hồi hoặc khóa.")
-        if role and role != acct["role"]:
-            raise HTTPException(status_code=403, detail="Vai trò yêu cầu không khớp danh bạ nội bộ.")
-        role = acct["role"]
-        team_id = acct["team_id"]
-        assigned_accounts = acct["assigned_accounts"]
-    elif _os.getenv("REQUIRE_ACCOUNT_DIRECTORY", "false").strip().lower() in {"1", "true", "yes"} or get_env_mode() == "production":
-        raise HTTPException(status_code=401, detail="Tài khoản chưa được ADMINISTRATOR cấp trong danh bạ nội bộ.")
+    role, team_id, assigned_accounts = resolve_login_identity(
+        db_path,
+        user_id=user_id,
+        requested_role=role,
+    )
 
     ttl_raw = payload.get("ttl_minutes")
-    ttl_minutes = int(ttl_raw) if ttl_raw is not None else None
+    ttl_minutes: int | None = None
+    if ttl_raw is not None:
+        try:
+            ttl_minutes = int(ttl_raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="ttl_minutes phải là số nguyên dương.") from exc
+        if get_env_mode() == "production":
+            raise HTTPException(status_code=400, detail="Production không cho phép ghi đè TTL phiên.")
 
     record, token = DEFAULT_SESSION_STORE.issue_signed_session(
         user_id=user_id,
@@ -608,7 +638,7 @@ def get_admin_incident_hold(
 def post_admin_incident_hold(
     payload: dict[str, Any] = Body(...),
     auth: AuthContext | None = Depends(
-        require_roles({"SUPERVISOR", "ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
+        require_roles({"ADMINISTRATOR"}, enforce_flag_fn=is_rbac_enforced_on_v1)
     ),
 ) -> dict[str, Any]:
     """PLPT-60 / SEC-08: Kích hoạt, ghi nhận thông báo 4h, hoặc mở khóa sự cố."""
@@ -697,6 +727,13 @@ def get_admin_security_readiness(
         "allow_legacy_role_header": is_legacy_role_header_allowed(),
         "session_ttl_minutes": get_session_ttl_minutes(),
         "secret_configured": secret_ok and not secret_is_placeholder,
+        "encryption_status": {
+            "tls_in_transit": "UNKNOWN",
+            "database_at_rest": "UNKNOWN",
+            "backups_at_rest": "UNKNOWN",
+            "exports_at_rest": "UNKNOWN",
+        },
+        "network_egress_status": "UNKNOWN",
         "active_sessions": DEFAULT_SESSION_STORE.active_session_count(),
         "revoked_sessions_count": revoked_count,
         "security_audit_logs_count": audit_count,
@@ -704,7 +741,7 @@ def get_admin_security_readiness(
         "vn_legal_compliance": {
             "reviewed_date": "2026-11-09",
             "dossier_ref": "docs/discovery/us_04_bao_mat_va_phap_ly_vietnam.md",
-            "signoff_status": "REVIEWED_PENDING_REAL_DATA_SIGNOFF",
+            "signoff_status": "PENDING_EXTERNAL_REAL_DATA_SIGNOFF",
             "instruments": [
                 {
                     "code": "Luật 91/2025/QH15",
@@ -745,8 +782,8 @@ def get_admin_security_readiness(
             ],
         },
         "sales_training_status": {
-            "status": "COMPLETED_PILOT_BRIEFING",
-            "completed_date": "2026-11-20",
+            "status": "PENDING_EXTERNAL_TRAINING_SIGNOFF",
+            "completed_date": None,
             "target_users": 20,
             "max_concurrent_sessions": 5,
             "topics_covered": [

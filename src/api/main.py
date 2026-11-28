@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import contextlib
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -63,9 +64,26 @@ app = FastAPI(
     version="1.2.0",
 )
 
+
+@app.on_event("startup")
+def validate_environment_on_startup() -> None:
+    from src.config.environment import validate_environment_paths
+
+    validate_environment_paths()
+
+
+def _get_cors_origins() -> list[str]:
+    configured = str(os.getenv("CORS_ALLOWED_ORIGINS", "")).strip()
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    if get_env_mode() == "production":
+        return []
+    return ["http://localhost", "http://127.0.0.1"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

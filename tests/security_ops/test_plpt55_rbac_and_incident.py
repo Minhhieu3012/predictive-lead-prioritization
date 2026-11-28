@@ -29,6 +29,11 @@ from src.security.incident_hold import (
     release_emergency_hold,
 )
 from src.security.rbac import ROLE_PERMISSIONS, VALID_ROLES, has_permission
+from src.config.environment import (
+    get_database_path,
+    get_quarantine_dir,
+    validate_environment_paths,
+)
 
 VN_TZ = timezone(timedelta(hours=7))
 
@@ -137,6 +142,38 @@ def test_sec08_four_hour_incident_hold_and_local_block(tmp_path: Path):
         created_by="sup_01",
     )
     assert blk["blocked"] is True
+
+
+def test_plpt61_environment_isolation(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+    monkeypatch.delenv("QUARANTINE_DIR", raising=False)
+
+    monkeypatch.setenv("ENV_MODE", "development")
+    assert "production" not in str(get_database_path()).lower()
+    assert "production" not in str(get_quarantine_dir()).lower()
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    assert "evaluation" in str(get_database_path()).lower()
+    assert "evaluation" in str(get_quarantine_dir()).lower()
+
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "production" / "must-not-cross.db"))
+    with pytest.raises(RuntimeError, match="không được trỏ"):
+        validate_environment_paths()
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+
+    monkeypatch.setenv("ENV_MODE", "production")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "x" * 40)
+    production_config = validate_environment_paths()
+    assert production_config["env_mode"] == "production"
+    assert "production" in production_config["database_path"].lower()
+
+    monkeypatch.setenv("ENV_MODE", "evaluation")
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "evaluation.db"))
+    assert validate_environment_paths()["database_path"].endswith("evaluation.db")
+
+    monkeypatch.setenv("ENV_MODE", "invalid")
+    with pytest.raises(ValueError, match="ENV_MODE"):
+        get_database_path()
 
 
 def test_plpt55_env_separation_and_secret_management(monkeypatch):

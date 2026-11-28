@@ -57,13 +57,13 @@ def get_daily_capacity_k() -> int:
 
 
 def get_db_path() -> Path:
-    project_root = Path(__file__).resolve().parents[2]
-    return Path(os.getenv("DATABASE_PATH", str(project_root / "data" / "songnhat.db")))
+    from src.config.environment import get_database_path
+    return get_database_path()
 
 
 def get_quarantine_dir() -> Path:
-    project_root = Path(__file__).resolve().parents[2]
-    return Path(os.getenv("QUARANTINE_DIR", str(project_root / "data" / "quarantine")))
+    from src.config.environment import get_quarantine_dir as get_env_quarantine_dir
+    return get_env_quarantine_dir()
 
 
 def strip_vietnamese_diacritics(text: str) -> str:

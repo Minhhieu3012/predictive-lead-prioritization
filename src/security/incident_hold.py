@@ -1,6 +1,8 @@
 """SEC-08 / USR-07 / OPS-05: Emergency Local Block & 4-Hour Incident Hold Response."""
 
 import contextlib
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
@@ -42,6 +44,17 @@ def ensure_incident_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(incident_holds)").fetchall()}
+    additions = {
+        "snapshot_id": "TEXT",
+        "snapshot_created_at": "TEXT",
+        "snapshot_audit_count": "INTEGER",
+        "snapshot_audit_hash": "TEXT",
+        "notification_draft": "TEXT",
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE incident_holds ADD COLUMN {column} {definition}")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS blocked_accounts (
@@ -82,12 +95,54 @@ def activate_emergency_hold(
     with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
         with conn:
             ensure_incident_tables(conn)
+            conn.row_factory = sqlite3.Row
+            active = conn.execute(
+                """
+                SELECT * FROM incident_holds
+                WHERE status = 'ACTIVE'
+                ORDER BY incident_id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if active is not None:
+                result = dict(active)
+                result["repeated_activation"] = True
+                return result
+
+            snapshot_id = f"INC-AUD-{triggered_dt.strftime('%Y%m%dT%H%M%S')}"
+            snapshot_created_at = triggered_dt.isoformat()
+            audit_rows: list[dict[str, Any]] = []
+            has_audit = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='security_audit_logs'"
+            ).fetchone()
+            if has_audit:
+                audit_rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT id, event_type, user_id, role, endpoint, status_code, detail, created_at
+                        FROM security_audit_logs
+                        ORDER BY id ASC
+                        """
+                    ).fetchall()
+                ]
+            snapshot_hash = hashlib.sha256(
+                json.dumps(audit_rows, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            notification_draft = (
+                f"Incident {snapshot_id}: security incident detected. "
+                f"Severity={norm_sev}; affected_scope={str(affected_scope or 'ALL_QUEUES').strip()}; "
+                f"triggered_by={str(triggered_by or 'SYSTEM').strip()} at {triggered_dt.isoformat()}. "
+                "Containment: queue serving and exports have been frozen."
+            )
             cur = conn.execute(
                 """
                 INSERT INTO incident_holds (
                     hold_code, status, severity, affected_scope, reason,
-                    triggered_by, triggered_at, notify_deadline_at
-                ) VALUES (?, 'ACTIVE', ?, ?, ?, ?, ?, ?)
+                    triggered_by, triggered_at, notify_deadline_at,
+                    snapshot_id, snapshot_created_at, snapshot_audit_count,
+                    snapshot_audit_hash, notification_draft
+                ) VALUES (?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     HOLD_STALE_DATA,
@@ -97,6 +152,11 @@ def activate_emergency_hold(
                     str(triggered_by or "SYSTEM").strip(),
                     triggered_dt.isoformat(),
                     deadline_dt.isoformat(),
+                    snapshot_id,
+                    snapshot_created_at,
+                    len(audit_rows),
+                    snapshot_hash,
+                    notification_draft,
                 ),
             )
             incident_id = int(cur.lastrowid)
@@ -113,6 +173,12 @@ def activate_emergency_hold(
         "triggered_at": triggered_dt.isoformat(),
         "notify_deadline_at": deadline_dt.isoformat(),
         "notify_sla_hours": INCIDENT_NOTIFY_SLA_HOURS,
+        "snapshot_id": snapshot_id,
+        "snapshot_created_at": snapshot_created_at,
+        "snapshot_audit_count": len(audit_rows),
+        "snapshot_audit_hash": snapshot_hash,
+        "notification_draft": notification_draft,
+        "repeated_activation": False,
     }
 
 
@@ -231,6 +297,15 @@ def get_active_incident_hold(db_path: str | Path) -> dict[str, Any] | None:
                 """
             ).fetchone()
             return dict(row) if row is not None else None
+
+
+def require_no_active_incident_hold(db_path: str | Path) -> None:
+    active = get_active_incident_hold(db_path)
+    if active is not None:
+        raise RuntimeError(
+            f"Hệ thống đang bị khóa khẩn cấp incident_id={active['incident_id']}; "
+            "thao tác xuất dữ liệu, sao lưu và khôi phục bị chặn."
+        )
 
 
 def commit_local_emergency_block(

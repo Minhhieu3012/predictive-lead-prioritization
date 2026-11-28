@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 import pytest
+import sqlite3
 
 from src.security.auth import (
     DEFAULT_PLACEHOLDER_SECRET,
@@ -95,7 +96,21 @@ def test_sec08_four_hour_incident_hold_and_local_block(tmp_path: Path):
         now=t0,
     )
     assert hold["hold_code"] == HOLD_STALE_DATA
+    assert hold["snapshot_id"]
+    assert hold["snapshot_audit_count"] >= 0
+    assert hold["snapshot_audit_hash"]
+    assert hold["notification_draft"]
     assert get_active_incident_hold(db_path) is not None
+
+    repeated = activate_emergency_hold(
+        db_path,
+        reason="Repeated activation should not create duplicate",
+        triggered_by="admin_01",
+        severity="CRITICAL",
+        now=t0 + timedelta(minutes=5),
+    )
+    assert repeated["repeated_activation"] is True
+    assert repeated["incident_id"] == hold["incident_id"]
 
     notif = record_purchaser_notification(
         db_path,
@@ -292,6 +307,28 @@ def test_plpt59_production_rejects_role_header(monkeypatch):
 
 
 
+def test_plpt60_ops_exports_and_backup_are_blocked_by_hold(tmp_path: Path):
+    from src.ops.backup_restore import create_sqlite_backup
+    from src.ops.portable_exit import export_portable_exit_bundle
+
+    db_path = tmp_path / "hold.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE TABLE clean_enquiries (enquiry_id TEXT)")
+        conn.execute("INSERT INTO clean_enquiries VALUES ('E-1')")
+
+    activate_emergency_hold(
+        db_path,
+        reason="Incident hold blocks exports",
+        triggered_by="admin_01",
+        severity="CRITICAL",
+    )
+
+    with pytest.raises(RuntimeError, match="khóa khẩn cấp"):
+        create_sqlite_backup(db_path, tmp_path / "backups")
+    with pytest.raises(RuntimeError, match="khóa khẩn cấp"):
+        export_portable_exit_bundle(db_path, tmp_path / "exports")
+
+
 def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monkeypatch):
     from datetime import datetime
     from fastapi.testclient import TestClient
@@ -327,6 +364,20 @@ def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monke
     assert r_acc.status_code == 200
     sales_tok = client.post("/auth/login", json={"user_id": "sales_a"}).json()["token"]
 
+    r_sup = client.post(
+        "/admin/accounts",
+        json={"user_id": "sup_01", "role": "SUPERVISOR", "team_id": "TEAM-A", "assigned_accounts": ["ACCT-A"]},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    )
+    assert r_sup.status_code == 200
+    sup_tok = client.post("/auth/login", json={"user_id": "sup_01"}).json()["token"]
+    denied_hold = client.post(
+        "/admin/incident-hold",
+        json={"action": "activate", "reason": "Supervisor must not activate"},
+        headers={"Authorization": f"Bearer {sup_tok}"},
+    )
+    assert denied_hold.status_code == 403
+
     # Lọc đúng ACCT-A và chặn IDOR sang E-B1 (403)
     q_sales = client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()
     assert q_sales["total"] == 1 and q_sales["items"][0]["account_key"] == "ACCT-A"
@@ -346,6 +397,13 @@ def test_plpt62_http_auth_rbac_directory_and_incident_hold(tmp_path: Path, monke
         json={"action": "activate", "reason": "PLPT-62 test", "severity": "CRITICAL"},
         headers={"Authorization": f"Bearer {admin_tok}"},
     ).json()
+    repeated_hold = client.post(
+        "/admin/incident-hold",
+        json={"action": "activate", "reason": "Repeated activation", "severity": "CRITICAL"},
+        headers={"Authorization": f"Bearer {admin_tok}"},
+    ).json()
+    assert repeated_hold["repeated_activation"] is True
+    assert repeated_hold["incident_id"] == hold["incident_id"]
     assert client.get("/api/v1/workspace/queue", headers={"Authorization": f"Bearer {sales_tok}"}).json()["locked"] is True
     assert client.post(
         "/admin/incident-hold",

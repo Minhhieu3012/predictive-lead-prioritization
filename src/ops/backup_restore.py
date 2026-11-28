@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from src.security.incident_hold import ensure_incident_tables
+from src.security.incident_hold import ensure_incident_tables, require_no_active_incident_hold
 
 VN_TZ = timezone(timedelta(hours=7))
 BACKUP_RETENTION_DAYS = 35
@@ -36,6 +36,7 @@ def create_sqlite_backup(
     src_path = Path(db_path)
     if not src_path.exists():
         raise FileNotFoundError(f"Database not found: {src_path}")
+    require_no_active_incident_hold(src_path)
 
     out_dir = Path(backup_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +79,7 @@ def restore_backup_with_restriction_replay(
     src_backup = Path(backup_path)
     if not src_backup.exists():
         raise FileNotFoundError(f"Backup file not found: {src_backup}")
+    require_no_active_incident_hold(target_db_path)
 
     actual_sha = _sha256_file(src_backup)
     if expected_sha256 and actual_sha != expected_sha256:
